@@ -1,0 +1,95 @@
+name: PR build
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: pr-build-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  install-and-test:
+    name: Install and test
+    runs-on: [self-hosted, Windows]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        run: python -m pytest
+
+  build-and-prerelease:
+    name: Build and publish prerelease
+    needs: install-and-test
+    runs-on: [self-hosted, Windows]
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Derive PR version string and patch pyproject.toml
+        id: version
+        run: |
+          $pyproject = Get-Content pyproject.toml -Raw
+          if ($pyproject -notmatch '(?m)^version\s*=\s*"([^"]+)"') {
+            throw "Could not find version in pyproject.toml"
+          }
+          $base = $matches[1]
+          $prNum = "${{ github.event.pull_request.number }}"
+          $sha = "${{ github.event.pull_request.head.sha }}".Substring(0, 7)
+          $prVersion = "$base-pr-$prNum-$sha"
+          Write-Host "PR version: $prVersion"
+          "pr_version=$prVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $patched = $pyproject -replace '(?m)^version\s*=\s*"[^"]+"', "version = `"$prVersion`""
+          Set-Content -Path pyproject.toml -Value $patched -NoNewline
+
+      - name: Install dependencies (after version patch)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Build executable
+        run: |
+          python -m PyInstaller --onefile --windowed --name py-tree-manager `
+            --copy-metadata py-tree-manager `
+            --add-data ".pipelines/update.bat;." `
+            main.py
+
+      - name: Rename artifact
+        run: |
+          $version = "${{ steps.version.outputs.pr_version }}"
+          Move-Item "dist/py-tree-manager.exe" "dist/py-tree-manager-$version.exe"
+
+      - name: Publish prerelease
+        run: |
+          $version = "${{ steps.version.outputs.pr_version }}"
+          $prNum = "${{ github.event.pull_request.number }}"
+          $sha = "${{ github.event.pull_request.head.sha }}"
+          gh release create "v$version" "dist/py-tree-manager-$version.exe" `
+            --prerelease `
+            --target "$sha" `
+            --title "PR #$prNum" `
+            --notes "Test build from PR #$prNum (commit $sha)."

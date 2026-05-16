@@ -1,0 +1,9 @@
+# Example
+pipelines:
+  default:
+      - step:
+          runs-on:
+            - self.hosted
+            - linux
+          script:
+            - echo "Hello World"

@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  install-and-test:
+    name: Install and test
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: [self-hosted, Windows]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        run: python -m pytest
+
+  build-and-release:
+    name: Bump, build, publish release
+    needs: install-and-test
+    runs-on: [self-hosted, Windows]
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout (full history, write-capable token)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Bump version, commit, tag, push
+        id: bump
+        run: .\.pipelines\ci\bump-version.ps1
+
+      - name: Install dependencies (post-bump)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Build executable
+        run: |
+          python -m PyInstaller --onefile --windowed --name py-tree-manager `
+            --copy-metadata py-tree-manager `
+            --add-data ".pipelines/update.bat;." `
+            main.py
+
+      - name: Rename artifact
+        env:
+          BUMPED_VERSION: ${{ steps.bump.outputs.new_version }}
+        run: .\.pipelines\ci\rename-artifact.ps1
+
+      - name: Publish release
+        run: |
+          $version = "${{ steps.bump.outputs.new_version }}"
+          gh release create "v$version" "dist/py-tree-manager-$version.exe" `
+            --latest `
+            --title "v$version" `
+            --notes "Release v$version."

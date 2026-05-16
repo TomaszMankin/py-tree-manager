@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+
+# Local virtual environments
+env/
+venv/
+.venv/
+qt_mockup/env/
+
+# Visual Studio
+.vs/
+*.pyproj.user
+
+# IDE / editor
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+nul
+
+# Per-machine Claude Code permission overrides
+.claude/settings.local.json
+
+# Agent operational scaffolding — local-only (see docs/architecture.md / cleanup standard)
+# JOURNAL, STATE, sprint backlog, PM intake, seed knowledge, feedback, critiques, PRDs all live here.
+.claude/.pipeline/
+
+# Diagnostic logs (live under <root>/.PyTreeManager/logs/;
+# the legacy repo-root logs/ path is preserved here for any pre-migration runs)
+logs/
+logs/pending/
+
