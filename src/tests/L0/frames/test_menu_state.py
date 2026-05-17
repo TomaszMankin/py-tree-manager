@@ -29,7 +29,7 @@ from src.frames.menu_state import (
 
 # Path to the source file for codepoint checks
 _FRAME_SOURCE = (
-    pathlib.Path(__file__).parent.parent.parent / "frames" / "add_person_frame.py"
+    pathlib.Path(__file__).parent.parent.parent.parent / "frames" / "add_person_frame.py"
 )
 
 # ---------------------------------------------------------------------------
