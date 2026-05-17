@@ -20,10 +20,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Show Python version
+        run: python --version
 
       - name: Install dependencies
         run: |
@@ -45,10 +43,8 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Show Python version
+        run: python --version
 
       - name: Derive PR version string and patch pyproject.toml
         id: version

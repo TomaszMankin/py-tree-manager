@@ -16,10 +16,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Show Python version
+        run: python --version
 
       - name: Install dependencies
         run: |
@@ -42,10 +40,8 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Show Python version
+        run: python --version
 
       - name: Bump version, commit, tag, push
         id: bump
