@@ -11,13 +11,17 @@ This project follows the stranger-readable surface standard:
 ## Session-start ritual
 
 Before any substantive response in this project, read in order:
-1. `.pipeline/STATE.md` — current phase + last agent action + carry-forward items.
-2. The last ~5 entries of `.pipeline/JOURNAL.md` (narrative thread across sessions).
+1. `.claude/.pipeline/STATE.md` — current phase + last agent action + carry-forward items.
+2. The last ~5 entries of `.claude/.pipeline/JOURNAL.md` (narrative thread across sessions).
 3. The user-memory pointer `~/.claude/projects/C--Users-Duch003/memory/project_py_tree_manager_status.md` — durable status; refreshed at every sprint close.
 4. `docs/decisions/INDEX.md` for any in-scope ADRs.
 5. Run `git log --oneline -10` from the project directory if my own conversation summary disagrees with the filesystem. **The filesystem is authoritative**; my summary may be stale.
 
 If you find yourself about to assert "the last shipped sprint is N", verify against `git log --grep "Merged feature/sprint-"` first.
+
+## Pipeline agent convention
+
+When `/deliver-project` (or any pipeline agent) runs against a dashboard issue, discoveries / refinements / decision-needed flags go as **comments on the source GitHub issue** via `gh issue comment <N> --body "..."`. Sprint plans, critiques, retros still go to `.claude/.pipeline/2-sprints/sprint-NN/` (gitignored, local) as before — only the user-facing thread goes to the issue.
 
 ## Quick context
 
