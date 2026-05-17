@@ -6,19 +6,18 @@ Source-of-truth repo: `https://github.com/TomaszMankin/py-tree-manager` (public)
 ## Routine flow (every merge to `main`)
 
 1. `.github/workflows/release.yml` fires on push to `main`.
-2. The `install-and-test` job runs `pytest` (skipped if the head commit message contains `[skip ci]`).
+2. The `install-and-test` job runs `pytest`.
 3. The `build-and-release` job:
-   - Runs `.pipelines/ci/bump-version.ps1`, which patch-bumps `pyproject.toml`
-     (X.Y.Z → X.Y.Z+1), commits with `[skip ci]`, tags `vX.Y.Z+1`, and pushes
-     both commit and tag back to `origin/main`.
+   - Runs `.pipelines/ci/bump-version.ps1`, which reads `pyproject.toml`'s base
+     version (`X.Y.Z`) plus existing tags matching `vX.Y.*`. Picks the next
+     patch (max-tag-patch + 1, or `Z` if no tag in this line yet). Patches
+     `pyproject.toml` in-place — **workflow-local, never committed**.
    - Runs PyInstaller (`--onefile --windowed --copy-metadata --add-data update.bat`).
-   - Renames the artifact to `dist/py-tree-manager-X.Y.Z+1.exe`.
-   - Publishes a GitHub Release tagged `vX.Y.Z+1` with the `.exe` as an asset,
-     marked `--latest`.
-4. The bump-commit push re-triggers `release.yml`, but the `install-and-test`
-   gate short-circuits on the `[skip ci]` marker, so the workflow is a no-op.
-   No infinite loop.
-5. The in-app updater on the father's machine polls
+   - Renames the artifact to `dist/py-tree-manager-X.Y.<resolved>.exe`.
+   - `gh release create vX.Y.<resolved> ... --latest --target <merge-sha>` —
+     creates the tag and publishes the release. Tags are not gated by the
+     main-branch ruleset, so no bypass needed.
+4. The in-app updater on the father's machine polls
    `https://api.github.com/repos/TomaszMankin/py-tree-manager/releases/latest`
    on next launch, sees the new `tag_name`, prompts in Polish, downloads the
    asset, runs `update.bat`, exits, and re-launches the new version.
@@ -28,18 +27,17 @@ Source-of-truth repo: `https://github.com/TomaszMankin/py-tree-manager` (public)
 Every push to a PR branch triggers `.github/workflows/pr-build.yml`:
 
 - Runs `pytest`.
-- Derives a per-commit version string: `<base>-pr-<pr-num>-<sha7>`.
+- Derives a PEP 440-compliant per-commit version: `<base>.dev<pr-num>+<sha7>`
+  (e.g. `1.0.0.dev3+a1b2c3d`). `.dev` sorts strictly below the base release.
 - Builds the `.exe` with that version embedded.
-- Publishes a GitHub Release tagged `v<base>-pr-<pr-num>-<sha7>` with
-  `--prerelease`.
+- Publishes a GitHub Release tagged `v<base>.dev<pr-num>+<sha7>` with `--prerelease`.
 
 Prereleases are excluded from `/releases/latest` by GitHub, so the in-app
 updater never offers them. Manual download from the Releases page only.
 
-The PR build also triggers `.github/workflows/pii-check.yml`, which scans the
-working tree for stale Bitbucket references, hardcoded personal paths, and
-process breadcrumbs that should not ship to a public repo. Fails the PR if any
-match.
+The PR also triggers `.github/workflows/pii-check.yml`, which scans for stale
+Bitbucket references, hardcoded personal paths, process breadcrumbs, and
+diagnostic leftovers. Fails the PR if any match.
 
 ## One-time setup
 
@@ -57,18 +55,20 @@ Follow the PowerShell snippet GitHub provides. Confirm labels include
 ### 2. Enable fork-PR approval gate
 
 Repo → Settings → Actions → General → "Fork pull request workflows from outside
-collaborators" → **Require approval for all outside collaborators**. This
-prevents fork PRs from running code on the self-hosted runner without an
-explicit approval step.
+collaborators" → **Require approval for all outside collaborators**.
 
-### 3. Confirm pwsh 7 is installed on the runner machine
+### 3. Install Python system-wide on the runner machine
+
+The runner service runs as `NT AUTHORITY\NETWORK SERVICE` by default, which
+cannot read user-scoped Python installs. Install Python so the service sees it:
 
 ```powershell
-pwsh --version
+winget install --id Python.Python.3.11 --scope machine --override "InstallAllUsers=1 PrependPath=1"
+Restart-Service "<runner service name>"
 ```
 
-If missing: `winget install Microsoft.PowerShell`. GitHub Actions defaults
-the shell to pwsh 7 on Windows runners when available.
+Confirm with `(Get-Command python).Source` from a fresh shell — should resolve to
+`C:\Program Files\Python311\python.exe`.
 
 ### 4. First-time install on the father's machine
 
@@ -79,33 +79,27 @@ After the first successful `release.yml` run on `main`:
    `Documents`, NOT `C:\Program Files\`. UAC blocks the `move /Y` in
    `update.bat` if the `.exe` lives in a protected folder.
 3. Add the folder to the antivirus exclusion list (some AV products flag the
-   self-replace pattern as ransomware-adjacent). On Windows Defender:
-   Settings → Virus & threat protection → Manage settings → Add or remove
-   exclusions → Add a folder.
+   self-replace pattern as ransomware-adjacent).
 4. Double-click to launch. The bundled `update.bat` extracts to the same
    folder on first run. From then on every launch auto-checks for updates.
 
 ## Manual minor or major bump
 
-Patch is auto-bumped on every merge. For a deliberate minor/major bump, edit
-`pyproject.toml` on a feature branch:
+Patch is auto-resolved from existing tags. For a deliberate minor or major
+bump, edit `pyproject.toml` on a feature branch:
 
 ```toml
 version = "1.1.0"
 ```
 
-Merge. The pipeline then patch-bumps to `1.1.1` and publishes that. If you
-want `1.1.0` as the exact released version, bump to `1.0.999` (or whatever
-the predecessor is) just before merging — patch bump produces `1.1.0`.
+Merge. The pipeline sees no existing `v1.1.*` tags, picks `1.1.0` (the
+pyproject value) as the first release in this line, then `1.1.1`, `1.1.2`...
+on subsequent merges.
 
 ## Hot-fixing a broken release
 
-Bump `pyproject.toml` manually on a feature branch, merge. Next auto-bump
-increments from your manual version.
-
-## Skipping CI on an emergency push
-
-Include `[skip ci]` in the commit message.
+Open a PR with the fix. Merge. The next patch number above the broken release
+is auto-resolved and published.
 
 ## Rollback
 
@@ -122,10 +116,10 @@ GitHub Releases keeps every published release. To roll back:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `release.yml` fires twice on a merge | `[skip ci]` token missing from the bump commit | Inspect the bump commit message; should contain `[skip ci]` literally |
-| `.exe` shows version `0.0.0` in the About dialog | `pip install -e .[dev]` did not run before PyInstaller | Check workflow log; the "Install dependencies (post-bump)" step is required |
+| `.exe` shows version `0.0.0` in the About dialog | `pip install -e .[dev]` did not run before PyInstaller, or pyproject.toml patch failed | Check workflow log; "Install dependencies (after version patch)" step is required |
 | Father's app prompts repeatedly for the same version | `skipped_update_version` was not saved | Check `<root>/.PyTreeManager/settings.json` for the key after declining |
 | App starts but no update prompt despite a newer release | Network error (offline, GitHub unreachable) | Expected — offline = silent skip per design |
 | `update.bat` exits with code 1 after 30 retries | UAC + `.exe` in a write-protected folder | Move the `.exe` to a personal folder (Desktop, Documents) |
 | Self-hosted runner is offline | Laptop is off | Power on; the workflow queue resumes |
-| PII check fails on a PR | A scan pattern matched against changed files | See `.pipelines/ci/pii-check.ps1`. Either fix the offending content or update the script's exclusion list |
+| PII check fails on a PR | A scan pattern matched against changed files | Fix the offending content or update `.pipelines/ci/pii-check.ps1` exclusions |
+| Release publish fails with "tag already exists" | Tag for the resolved version is already present (e.g. you manually pushed one) | Bump pyproject.toml past the existing tag and re-merge |

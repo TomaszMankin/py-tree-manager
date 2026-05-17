@@ -110,7 +110,8 @@ class TestShortcutRealPyWin32:
         )
         link2.QueryInterface(pythoncom.IID_IPersistFile).Load(str(shortcut_path), 0)
         round_tripped_target = link2.GetPath(0)[0]
-        assert round_tripped_target == str(target), (
+        # IShellLinkW.Save canonicalises path case via shell registry.
+        assert Path(round_tripped_target) == Path(str(target)), (
             f"TargetPath mismatch: expected {str(target)!r}, got {round_tripped_target!r}"
         )
 
@@ -184,7 +185,7 @@ class TestShortcutRealPyWin32:
         )
         link2.QueryInterface(pythoncom.IID_IPersistFile).Load(str(shortcut_path), 0)
         round_tripped_target = link2.GetPath(0)[0]
-        assert round_tripped_target == str(target), (
+        assert Path(round_tripped_target) == Path(str(target)), (
             f"TargetPath mismatch: expected {str(target)!r}, "
             f"got {round_tripped_target!r} — payload may be ANSI-mangled"
         )

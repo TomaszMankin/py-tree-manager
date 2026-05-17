@@ -20,10 +20,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Show Python version
+        run: python --version
 
       - name: Install dependencies
         run: |
@@ -45,14 +43,13 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Show Python version
+        run: python --version
 
       - name: Derive PR version string and patch pyproject.toml
         id: version
         run: |
+          # PEP 440 form: <base>.dev<PR>+<sha7>. Sorts strictly below <base>.
           $pyproject = Get-Content pyproject.toml -Raw
           if ($pyproject -notmatch '(?m)^version\s*=\s*"([^"]+)"') {
             throw "Could not find version in pyproject.toml"
@@ -60,7 +57,7 @@ jobs:
           $base = $matches[1]
           $prNum = "${{ github.event.pull_request.number }}"
           $sha = "${{ github.event.pull_request.head.sha }}".Substring(0, 7)
-          $prVersion = "$base-pr-$prNum-$sha"
+          $prVersion = "$base.dev$prNum+$sha"
           Write-Host "PR version: $prVersion"
           "pr_version=$prVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           $patched = $pyproject -replace '(?m)^version\s*=\s*"[^"]+"', "version = `"$prVersion`""

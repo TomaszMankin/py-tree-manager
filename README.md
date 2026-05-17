@@ -1,6 +1,6 @@
 # py-tree-manager
 
-A Python/wxPython desktop application for managing a family tree stored as a flat folder structure on Windows. Single-user, Polish UI. This is a bridge app that reads and writes `me.json` files produced by the predecessor C# system, letting the user manage people, relationships, and shortcuts until a future server-backed system is ready.
+A Python/wxPython desktop application for managing a family tree stored as a flat folder structure on Windows. Single-user, Polish UI. This is a bridge app that reads and writes `me.json` files produced by the predecessor C# system, letting the user manage people, relationships, and shortcuts until a future server-backed system is ready. 
 
 ## Tech stack
 

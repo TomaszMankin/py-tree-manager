@@ -21,11 +21,36 @@ If you find yourself about to assert "the last shipped sprint is N", verify agai
 
 ## Quick context
 
-- **Tech stack**: Python 3 + wxPython 4.x + pywin32; Windows-only desktop app
+- **Tech stack**: Python 3.11+ + wxPython 4.x + pywin32; Windows-only desktop app
 - **Entry point**: `main.py` (installs `sys.excepthook` before `wx` import to keep the module wx-free at import time)
-- **Local venv**: not committed; recreate via `python -m venv env && env\Scripts\activate && pip install -r requirements.txt -r requirements-dev.txt`
+- **Local venv**: not committed; recreate via `python -m venv env && env\Scripts\activate && pip install -e ".[dev]"`
 - **Run the app**: `env\Scripts\python.exe main.py`
 - **Run tests**: `python -m pytest`
+
+## CI / self-hosted runner
+
+GitHub Actions on a self-hosted Windows runner registered at the repo level. Workflows live at `.github/workflows/`. Helper scripts at `.pipelines/ci/`.
+
+### Inspect runs
+- `gh run list --limit 5` — recent runs
+- `gh run view <id>` — summary; `--log-failed` for the failed-step log only
+- `gh run watch <id>` — stream live until done
+
+### Runner service (Windows)
+- Discover: `Get-CimInstance Win32_Service -Filter "Name LIKE 'actions.runner%'" | Format-List Name,StartName,State`
+- Restart after any PATH / Python change: `Restart-Service '<exact Name from above>'`
+- The runner inherits System PATH at service-start; user-scoped installs are invisible to it. Python must be installed system-wide (`C:\Program Files\Python3xx\`) and on System PATH, OR the service must be reconfigured to log on as a user with the install.
+
+### Known runner-environment quirks
+- Default service account `NT AUTHORITY\NETWORK SERVICE` cannot read other users' AppData.
+- `tmp_path` under `C:\Windows\ServiceProfiles\NetworkService\...` — paths returned by `IShellLinkW.Save()` are canonicalised through the shell registry and may differ in case (`Windows` vs `WINDOWS`). Compare paths via `pathlib.Path()` equality, not strings.
+- pwsh 7 is the default shell for `run:` steps when installed system-wide; PS 5.1 traps don't apply here (unlike the prior Bitbucket pipeline).
+
+### When CI fails but local tests pass
+1. Service-account path-case (above).
+2. Encoding (system Python may differ from local; check cp1252 vs utf-8).
+3. Missing dev dependency in `pyproject.toml`'s `[project.optional-dependencies.dev]`.
+4. PEP 440 violation in derived version strings (PR builds use `<base>.dev<N>+<sha>`, never hyphens).
 
 ## Domain quick-reference
 
