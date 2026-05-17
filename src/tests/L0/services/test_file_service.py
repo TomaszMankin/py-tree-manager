@@ -27,7 +27,7 @@ from src.wrappers.settings_wrapper import SettingsWrapper, SettingsDataProperty
 # Helpers
 # ---------------------------------------------------------------------------
 
-FIXTURE_DIR = Path(__file__).parent.parent / "fixtures"
+FIXTURE_DIR = Path(__file__).parent.parent.parent / "fixtures"
 BOM_FIXTURE = FIXTURE_DIR / "me_json_with_bom.json"
 NO_BOM_FIXTURE = FIXTURE_DIR / "me_json_no_bom.json"
 

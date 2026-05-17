@@ -166,20 +166,24 @@ def me_json_factory():
 
 
 # ---------------------------------------------------------------------------
-# Session-scoped no-real-emails guard.
+# Test tier organization (src/tests/L0, L1, L2 — see docs/architecture.md).
 #
-# Two defensive layers prevent any test from sending a real email:
-#   1. PYTREEMANAGER_EMAIL_* env vars are removed for the entire session.
-#      With them gone, is_email_configured() returns False and the email
-#      enqueue path short-circuits before reaching _attempt_send.
-#   2. smtplib.SMTP_SSL is replaced with a MagicMock. Even if a code path
-#      reaches the network layer (e.g., a test sets the env vars locally
-#      via monkeypatch.setenv), the SMTP_SSL call returns a mock instead
-#      of opening a real socket.
+#   L0/  — unit tests. Each class/function in isolation with ALL dependencies
+#          mocked. Fast, hermetic.
+#   L1/  — integration tests. Two flavours coexist here:
+#            (a) whole-repo flows with externals mocked
+#            (b) tests of the specific classes that DO talk to externals,
+#                verifying the communication itself works (real pywin32,
+#                fake-SMTP trap server, etc.)
+#   L2/  — black-box e2e tests against the built .exe. User-path centric,
+#          not code-centric. Currently empty; populated by issue #4.
 #
-# Individual tests that need specific SMTP behaviour use per-test
-# monkeypatch.setattr(smtplib, "SMTP_SSL", ...) — pytest's monkeypatch
-# undoes after each test, restoring the session-wide mock.
+# All three tiers run on every PR (pr-build.yml runs them sequentially:
+# L0 first, then L1 only if L0 passed, then L2 only if L1 passed).
+#
+# Session-wide defense-in-depth (below): no test in any tier can send a
+# real email. PYTREEMANAGER_EMAIL_* env vars are popped and smtplib.SMTP_SSL
+# is replaced with a MagicMock for the whole session.
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True, scope="session")
