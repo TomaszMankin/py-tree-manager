@@ -104,7 +104,7 @@ class LineageService:
         """Return ({surname -> LineageMembers}, build_log).
 
         Keys are distinct lineage surnames. Values hold the contributor UID
-        and the ordered, deduplicated member UID list per ADR-016 §2.2 rules.
+        and the ordered, deduplicated member UID list (universal + R3 + R4 walk).
         The build_log contains informational / anomaly entries only.
         """
         self._person_cache = {}

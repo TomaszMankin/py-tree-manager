@@ -84,7 +84,7 @@ def _add_to_cache(fs, uid: str, name: str, folder: Path) -> None:
 
 # ---------------------------------------------------------------------------
 # Test 1 — 13-person tree, two subfolders, chain-break at great-grandfather
-#           (maternal side enriched per ADR-016 §1.2 worked example)
+#           (maternal side enriched via spouse-leaf + ancestor walk)
 # ---------------------------------------------------------------------------
 
 class TestLineageE2ENinePersonTree:
@@ -94,7 +94,7 @@ class TestLineageE2ENinePersonTree:
     ):
         """13-person tree: father-surname/ has 8 .lnk, mother-maiden/ has 8 .lnk.
 
-        Tree layout (placeholders, per ADR-016 §1.2):
+        Tree layout (placeholders):
           root (parents=[father, mother], spouse=[spouse], children=[child])
           spouse (parents=[])
           child (spouse=[child_spouse])
@@ -109,7 +109,7 @@ class TestLineageE2ENinePersonTree:
           gggf_maternal (last_name=<unrelated-2>, maiden_name=<mmaid>, has_maiden=False)
                                                                       <- maternal chain breaks
 
-        father-surname/ expected members (ADR-016 §1.2 trace):
+        father-surname/ expected members (trace):
           universal (root, spouse, child, child_spouse) = 4
           R3: father + mother (father's spouse) = 2
           R4: gf_paternal (matches fsurname) -> add gm_paternal as spouse-leaf; walk parents
@@ -117,7 +117,7 @@ class TestLineageE2ENinePersonTree:
           R4 yields: gf_paternal + gm_paternal = 2
           Total = 8 .lnk
 
-        mother-maiden/ expected members (ADR-016 §1.2 trace):
+        mother-maiden/ expected members (trace):
           universal (root, spouse, child, child_spouse) = 4
           R3: mother + father (mother's spouse) = 2
           R4 walk from mother's parents:

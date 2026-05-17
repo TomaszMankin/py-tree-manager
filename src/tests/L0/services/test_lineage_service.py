@@ -14,7 +14,7 @@ Test cases:
  11  Ancestor walk termination on surname mismatch
  12  Ancestor spouse-leaf rule
  13  No spouse, no children — universal = {root}
- 14  Surname collision across contributors (test 5 variant from ADR-016 §6.1 #14)
+ 14  Surname collision across contributors (two contributors share a surname)
  15  Empty maiden case for mother (has_maiden=True, maiden_name="(nieznane)")
  16  All 4 contributors distinct — universal appears in all 4 folders
  17  Three-generation descendants recursion (root -> child -> grandchild)
@@ -833,7 +833,7 @@ class TestNoSpouseNoChildren:
 
 
 # ---------------------------------------------------------------------------
-# Test 14 — Surname collision across contributors (ADR-016 §3.5)
+# Test 14 — Surname collision across contributors
 # ---------------------------------------------------------------------------
 
 class TestSurnameCollisionAcrossContributors:
