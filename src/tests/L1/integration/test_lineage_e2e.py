@@ -5,7 +5,7 @@ is stubbed (creates empty files) via the conftest autouse patch, so no COM
 calls happen here. Tests assert on-disk folder/file structure.
 
 Test cases:
-  1  9-person tree: two subfolders, correct .lnk counts, chain-break verified
+  1  13-person tree: two subfolders, correct .lnk counts, chain-break verified
   2  Stale file wipe: second rebuild removes old subfolders
 """
 
@@ -83,7 +83,8 @@ def _add_to_cache(fs, uid: str, name: str, folder: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 1 — 9-person tree, two subfolders, chain-break at great-grandfather
+# Test 1 — 13-person tree, two subfolders, chain-break at great-grandfather
+#           (maternal side enriched per ADR-016 §1.2 worked example)
 # ---------------------------------------------------------------------------
 
 class TestLineageE2ENinePersonTree:
@@ -91,35 +92,41 @@ class TestLineageE2ENinePersonTree:
     def test_nine_person_tree_two_subfolders_correct_member_counts(
         self, tmp_path, monkeypatch
     ):
-        """9-person tree: father-surname/ has 8 .lnk, mother-maiden/ has 4 .lnk;
-        great-grandfather excluded (surname differs); both subfolders have build-log.txt.
+        """13-person tree: father-surname/ has 8 .lnk, mother-maiden/ has 8 .lnk.
 
-        Tree layout (placeholders):
+        Tree layout (placeholders, per ADR-016 §1.2):
           root (parents=[father, mother], spouse=[spouse], children=[child])
           spouse (parents=[])
           child (spouse=[child_spouse])
           child_spouse
-          father (last_name=<fsurname>, parents=[gf_paternal])
-          mother (has_maiden=True, maiden_name=<mmaid>, parents=[])
+          father (last_name=<fsurname>, parents=[gf_paternal, gm_paternal])
+          mother (has_maiden=True, maiden_name=<mmaid>, parents=[gf_maternal, gm_maternal])
           gf_paternal (last_name=<fsurname>, parents=[ggf_paternal])
-          gm_paternal (last_name=<unrelated>, spouse=[gf_paternal])  <- spouse-leaf
-          ggf_paternal (last_name=<other> != <fsurname>)             <- chain breaks here
+          gm_paternal (last_name=<unrelated>, has_maiden=True, maiden_name=<unrelated-maiden>)
+          ggf_paternal (last_name=<other> != <fsurname>)             <- paternal chain breaks
+          gf_maternal  (last_name=<unrelated-gfm>)                   <- no maiden match
+          gm_maternal  (last_name=<unrelated-gmm>, has_maiden=True, maiden_name=<mmaid>)
+          gggf_maternal (last_name=<unrelated-2>, maiden_name=<mmaid>, has_maiden=False)
+                                                                      <- maternal chain breaks
 
-        father-surname/ expected members:
+        father-surname/ expected members (ADR-016 §1.2 trace):
           universal (root, spouse, child, child_spouse) = 4
           R3: father + mother (father's spouse) = 2
-          R4: gf_paternal (matches) + gm_paternal (gf's spouse-leaf) = 2
-          ggf_paternal: surname differs -> excluded
+          R4: gf_paternal (matches fsurname) -> add gm_paternal as spouse-leaf; walk parents
+              ggf_paternal: surname differs -> stop
+          R4 yields: gf_paternal + gm_paternal = 2
           Total = 8 .lnk
 
-        mother-maiden/ expected members:
+        mother-maiden/ expected members (ADR-016 §1.2 trace):
           universal (root, spouse, child, child_spouse) = 4
-          R3: mother + father (mother's spouse) = 2 (dedup: father already in universal? no)
-          mother has no parents in fixture -> R4 adds nothing
-          Total = 6 .lnk
-
-        Note: father is not in universal (he is not root's descendant). mother is not
-        in universal either. So both R3 entries are net-new.
+          R3: mother + father (mother's spouse) = 2
+          R4 walk from mother's parents:
+            gf_maternal: lineage surname = <unrelated-gfm> (no maiden). No match. Stop.
+            gm_maternal: lineage surname = <mmaid> (has_maiden=True). Match. Include.
+              Add spouse-leaf gf_maternal. Walk gm_maternal's parents:
+              gggf_maternal: has_maiden=False -> uses last_name=<unrelated-2>. No match. Stop.
+          R4 yields: gm_maternal + gf_maternal (as spouse-leaf) = 2
+          Total = 8 .lnk
         """
         import tempfile as _tempfile
         from src.services.tree_service import TreeService
@@ -148,56 +155,78 @@ class TestLineageE2ENinePersonTree:
         gf_paternal_uid = str(uuid.uuid4())
         gm_paternal_uid = str(uuid.uuid4())
         ggf_paternal_uid = str(uuid.uuid4())
+        gf_maternal_uid = str(uuid.uuid4())
+        gm_maternal_uid = str(uuid.uuid4())
+        gggf_maternal_uid = str(uuid.uuid4())
 
         father_surname = "Mankin"
         mother_maiden = "Pastryk"
 
-        # Leaf nodes first (no unresolved parents_id references)
+        # --- Paternal side ---
         ggf_folder = _write_person(tree_root, ggf_paternal_uid, "Karol Inny",
                                    last_name="Inny")
-        gm_folder = _write_person(tree_root, gm_paternal_uid, "Helena Inna",
-                                  last_name="Inna", sex="Kobieta")
-        gf_folder = _write_person(tree_root, gf_paternal_uid, "Stefan Mankin",
-                                  last_name=father_surname,
-                                  spouse=[str(gm_folder)],
-                                  spouse_id=[gm_paternal_uid],
-                                  parents=[str(ggf_folder)],
-                                  parents_id=[ggf_paternal_uid])
-        father_folder = _write_person(tree_root, father_uid, "Adam Mankin",
-                                      last_name=father_surname,
-                                      parents=[str(gf_folder)],
-                                      parents_id=[gf_paternal_uid])
+        gm_paternal_folder = _write_person(tree_root, gm_paternal_uid, "Helena Inna",
+                                           last_name="Inna",
+                                           maiden_name="InnaP",
+                                           has_maiden_name=True,
+                                           sex="Kobieta")
+        gf_paternal_folder = _write_person(tree_root, gf_paternal_uid, "Stefan Mankin",
+                                           last_name=father_surname,
+                                           spouse_id=[gm_paternal_uid],
+                                           parents_id=[ggf_paternal_uid])
+
+        # --- Maternal side ---
+        # gggf_maternal: has_maiden=False but maiden_name set — gate dominates, uses last_name
+        gggf_maternal_folder = _write_person(
+            tree_root, gggf_maternal_uid, "Waclaw Obcy",
+            last_name="Obcy",
+            maiden_name=mother_maiden,  # field set, but has_maiden=False -> last_name used
+            has_maiden_name=False,
+        )
+        # gm_maternal: has_maiden=True, maiden_name matches mother_maiden -> included in walk
+        gm_maternal_folder = _write_person(
+            tree_root, gm_maternal_uid, "Zofia Inna",
+            last_name="Inna",
+            maiden_name=mother_maiden,
+            has_maiden_name=True,
+            sex="Kobieta",
+            spouse_id=[gf_maternal_uid],
+            parents_id=[gggf_maternal_uid],
+        )
+        # gf_maternal: last_name unrelated, no maiden -> no match; included as spouse-leaf only
+        gf_maternal_folder = _write_person(
+            tree_root, gf_maternal_uid, "Henryk Obcy",
+            last_name="Obcy",
+            spouse_id=[gm_maternal_uid],
+        )
+
+        # --- mother: has parents gf_maternal + gm_maternal ---
         mother_folder = _write_person(tree_root, mother_uid, "Anna Mankin",
                                       last_name=father_surname,
                                       maiden_name=mother_maiden,
                                       has_maiden_name=True,
                                       sex="Kobieta",
-                                      spouse=[str(father_folder)],
-                                      spouse_id=[father_uid])
-        # Wire father's spouse back to mother
-        # (re-write father's me.json with spouse link)
+                                      spouse_id=[father_uid],
+                                      parents_id=[gf_maternal_uid, gm_maternal_uid])
+
+        # --- father: parents gf_paternal + gm_paternal; spouse = mother ---
         father_folder = _write_person(tree_root, father_uid, "Adam Mankin",
                                       last_name=father_surname,
-                                      parents=[str(gf_folder)],
-                                      parents_id=[gf_paternal_uid],
-                                      spouse=[str(mother_folder)],
-                                      spouse_id=[mother_uid])
+                                      spouse_id=[mother_uid],
+                                      parents_id=[gf_paternal_uid, gm_paternal_uid])
+
         child_spouse_folder = _write_person(tree_root, child_spouse_uid,
                                             "Marta Kowalska",
                                             last_name="Kowalska", sex="Kobieta")
         child_folder = _write_person(tree_root, child_uid, "Piotr Mankin",
                                      last_name=father_surname,
-                                     spouse=[str(child_spouse_folder)],
                                      spouse_id=[child_spouse_uid])
         spouse_folder = _write_person(tree_root, spouse_uid, "Maria Mankin",
                                       last_name=father_surname, sex="Kobieta")
         root_folder = _write_person(tree_root, root_uid, "Tomasz Mankin",
                                     last_name=father_surname,
-                                    parents=[str(father_folder), str(mother_folder)],
                                     parents_id=[father_uid, mother_uid],
-                                    spouse=[str(spouse_folder)],
                                     spouse_id=[spouse_uid],
-                                    children=[str(child_folder)],
                                     children_id=[child_uid])
 
         for u, n, f in [
@@ -207,9 +236,12 @@ class TestLineageE2ENinePersonTree:
             (child_spouse_uid, "Marta Kowalska", child_spouse_folder),
             (father_uid, "Adam Mankin", father_folder),
             (mother_uid, "Anna Mankin", mother_folder),
-            (gf_paternal_uid, "Stefan Mankin", gf_folder),
-            (gm_paternal_uid, "Helena Inna", gm_folder),
+            (gf_paternal_uid, "Stefan Mankin", gf_paternal_folder),
+            (gm_paternal_uid, "Helena Inna", gm_paternal_folder),
             (ggf_paternal_uid, "Karol Inny", ggf_folder),
+            (gf_maternal_uid, "Henryk Obcy", gf_maternal_folder),
+            (gm_maternal_uid, "Zofia Inna", gm_maternal_folder),
+            (gggf_maternal_uid, "Waclaw Obcy", gggf_maternal_folder),
         ]:
             _add_to_cache(fs, u, n, f)
 
@@ -226,8 +258,9 @@ class TestLineageE2ENinePersonTree:
             f"Expected subfolders {[father_surname, mother_maiden]}, got {subfolder_names}"
         )
 
-        # father-surname/ — 8 members:
-        # universal(4) + R3(2: father+mother) + R4(2: gf_paternal + gm_paternal)
+        # father-surname/ — 8 .lnk:
+        # universal(4) + R3(2: father+mother) + R4(2: gf_paternal + gm_paternal spouse-leaf)
+        # ggf_paternal excluded (surname differs)
         father_sub = lineage_root / father_surname
         father_lnks = [p for p in father_sub.iterdir() if p.suffix == ".lnk"]
         assert len(father_lnks) == 8, (
@@ -236,26 +269,32 @@ class TestLineageE2ENinePersonTree:
         )
 
         # ggf_paternal must NOT be in father_sub (chain breaks at him)
-        ggf_lnk_name = "Karol Inny.lnk"
-        assert not (father_sub / ggf_lnk_name).exists(), (
+        assert not (father_sub / "Karol Inny.lnk").exists(), (
             "ggf_paternal should be excluded (surname differs)"
         )
 
-        # mother-maiden/ — 6 members: universal(4) + R3(2: mother+father)
+        # mother-maiden/ — 8 .lnk:
+        # universal(4) + R3(2: mother+father) + R4(2: gm_maternal + gf_maternal spouse-leaf)
+        # gggf_maternal excluded (has_maiden=False, last_name unrelated)
         mother_sub = lineage_root / mother_maiden
         mother_lnks = [p for p in mother_sub.iterdir() if p.suffix == ".lnk"]
-        assert len(mother_lnks) == 6, (
-            f"mother-maiden/ expected 6 .lnk files, got {len(mother_lnks)}: "
+        assert len(mother_lnks) == 8, (
+            f"mother-maiden/ expected 8 .lnk files, got {len(mother_lnks)}: "
             f"{[p.name for p in mother_lnks]}"
         )
 
-        # build-log.txt at both levels (H-Sprint-D)
+        # gggf_maternal must NOT be in mother_sub (has_maiden=False -> last_name, no match)
+        assert not (mother_sub / "Waclaw Obcy.lnk").exists(), (
+            "gggf_maternal should be excluded (has_maiden=False gate)"
+        )
+
+        # build-log.txt at both levels
         assert (lineage_root / "build-log.txt").exists()
         assert (father_sub / "build-log.txt").exists()
         assert (mother_sub / "build-log.txt").exists()
 
-        # total_written == 8 + 6 = 14
-        assert written == 14, f"Expected 14 total shortcuts written, got {written}"
+        # total_written == 8 + 8 = 16
+        assert written == 16, f"Expected 16 total shortcuts written, got {written}"
 
 
 # ---------------------------------------------------------------------------
