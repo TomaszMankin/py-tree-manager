@@ -7,7 +7,7 @@
 | ADR-001 | Use IShellLink + IPersistFile directly for `.lnk` creation (not WScript.Shell) | accepted | 2026-05-02 |
 | ADR-002 | UI framework — keep wxPython with documented migration path to PySide6 | accepted | 2026-05-04 |
 | ADR-003 | Drzewo encoding scheme and hourglass selection algorithm (Amendment 2: spouse-seeded ancestor DFS) | accepted | 2026-05-09 |
-| ADR-004 | Rody encoding scheme + surname-extraction algorithm + `.lnk` targets | accepted | 2026-05-09 |
+| ADR-004 | Rody encoding scheme + surname-extraction algorithm + `.lnk` targets | superseded by ADR-016 | 2026-05-09 |
 | ADR-005 | Mode background palette refresh — three new mode tints distinct from picker hues | accepted | 2026-05-09 |
 | ADR-006 | Logging architecture — decorator-based journey log, dual exception hooks, file-lock self-recovery | accepted | 2026-05-09 |
 | ADR-007 | Severity model + log-line format — INFO/ERROR/CRITICAL semantics and grammar | accepted | 2026-05-09 |
@@ -19,6 +19,7 @@
 | ADR-013 | Version embedding via `importlib.metadata` + in-app update detection against GitHub Releases | accepted (amended by ADR-015) | 2026-05-12 |
 | ADR-014 | Self-replace update_helper mechanism — `.bat` helper with retry-on-lock and silent relaunch | accepted | 2026-05-12 |
 | ADR-015 | Migrate hosting + CI from Bitbucket Pipelines to GitHub Actions + GitHub Releases | accepted | 2026-05-17 |
+| ADR-016 | Lineage folders — surname-grouped subfolders with descendant + ancestor membership (supersedes ADR-004) | accepted | 2026-05-17 |
 
 ## Conventions
 

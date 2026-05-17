@@ -2,15 +2,24 @@
 id: ADR-004
 title: Rody encoding scheme + surname-extraction algorithm + .lnk targets
 kind: tech
-status: accepted
+status: superseded-by ADR-016
 date: 2026-05-09
-amended: 2026-05-09
+amended: 2026-05-17
 author: architect
 sprint: sprint-10
 ---
 
 ## Changelog
 
+- **2026-05-17** — superseded by **ADR-016**. Issue
+  [#20](https://github.com/TomaszMankin/py-tree-manager/issues/20) showed
+  the flat `<surname>.lnk` shape does not match the user's mental model
+  (a lineage is a set of people, not a single contributor). The new
+  `<root>/Rody/<surname>/<person>.lnk` subfolder layout + R1-R4 membership
+  rules live in ADR-016. The `extract_lineage_surname` function + the
+  four-contributors enumeration order + the first-contributor collision
+  rule survive verbatim (cited as sources in ADR-016 §2.1, §3.5).
+  Everything else in this ADR is replaced.
 - **2026-05-09** — initial drafting (Sprint 10 design dispatch).
 - **2026-05-09 (revision, same day)** — §7 dependency on Sprint 09's
   `get_effective_parent_ids` helper **dropped**. The helper was tied to a
