@@ -166,20 +166,23 @@ def me_json_factory():
 
 
 # ---------------------------------------------------------------------------
-# Session-scoped no-real-emails guard.
+# Email isolation policy (L0/L1 split).
 #
-# Two defensive layers prevent any test from sending a real email:
-#   1. PYTREEMANAGER_EMAIL_* env vars are removed for the entire session.
-#      With them gone, is_email_configured() returns False and the email
-#      enqueue path short-circuits before reaching _attempt_send.
-#   2. smtplib.SMTP_SSL is replaced with a MagicMock. Even if a code path
-#      reaches the network layer (e.g., a test sets the env vars locally
-#      via monkeypatch.setenv), the SMTP_SSL call returns a mock instead
-#      of opening a real socket.
+#   L0  — must never touch external systems. Two defensive layers in the
+#         session fixture below ensure no test can reach real SMTP:
+#           1. PYTREEMANAGER_EMAIL_* env vars are popped session-wide.
+#              is_email_configured() then returns False and the enqueue
+#              path short-circuits before _attempt_send.
+#           2. smtplib.SMTP_SSL is replaced with a MagicMock session-wide.
+#              Per-test monkeypatch.setattr that overrides this is auto-
+#              restored after each test.
 #
-# Individual tests that need specific SMTP behaviour use per-test
-# monkeypatch.setattr(smtplib, "SMTP_SSL", ...) — pytest's monkeypatch
-# undoes after each test, restoring the session-wide mock.
+#   L1a — repo-side flow with externals mocked. Same defenses as L0 apply.
+#
+#   L1b — dedicated SMTP-integration tests that DO talk to real SMTP. Mark
+#         with @pytest.mark.email_smtp. They auto-skip in normal runs and
+#         only execute when PYTREEMANAGER_TEST_REAL_SMTP=1 is set in the
+#         shell. The skip hook is below.
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True, scope="session")
@@ -201,3 +204,16 @@ def _no_real_emails_during_tests():
         os.environ["PYTREEMANAGER_EMAIL_PASSWORD"] = original_password
     if original_recipient is not None:
         os.environ["PYTREEMANAGER_EMAIL_RECIPIENT"] = original_recipient
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip @pytest.mark.email_smtp unless PYTREEMANAGER_TEST_REAL_SMTP=1."""
+    import os
+    if os.environ.get("PYTREEMANAGER_TEST_REAL_SMTP", "").strip() == "1":
+        return
+    skip_real_smtp = pytest.mark.skip(
+        reason="L1b SMTP test; opt-in via PYTREEMANAGER_TEST_REAL_SMTP=1."
+    )
+    for item in items:
+        if "email_smtp" in item.keywords:
+            item.add_marker(skip_real_smtp)
