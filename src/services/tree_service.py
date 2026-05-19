@@ -495,7 +495,8 @@ class TreeService():
     def rebuild_lineage(self) -> Tuple[int, List[str]]:
         """Wipe <root>/Rody/ and rebuild from the current Drzewo root-person UUID.
 
-        Rody shares the root anchor with Drzewo.
+        Rody shares the root anchor with Drzewo. Creates one subfolder per
+        distinct lineage surname, each containing .lnk files for all members.
 
         Returns:
             (count_written, build_log_messages)
@@ -503,7 +504,11 @@ class TreeService():
         Raises:
             RuntimeError: if no Drzewo root person is set in settings.
         """
-        from src.services.lineage_service import LineageService
+        from src.services.lineage_service import (
+            LineageService,
+            encode_lineage_folder_name,
+            encode_person_lnk_name,
+        )
 
         root_uuid = self._file_service.get_folder_tree_root_uuid()
         if not root_uuid:
@@ -511,11 +516,11 @@ class TreeService():
                 "Drzewo root person is not set (Rody shares the root)."
             )
 
-        lineage_path = Path(self._file_service._get_root_folder()) / "Rody"
-        lineage_path.mkdir(exist_ok=True)
+        lineage_root = Path(self._file_service._get_root_folder()) / "Rody"
+        lineage_root.mkdir(exist_ok=True)
 
         # Wipe existing contents (best-effort)
-        for item in list(lineage_path.iterdir()):
+        for item in list(lineage_root.iterdir()):
             try:
                 if item.is_file() or item.is_symlink():
                     item.unlink()
@@ -524,36 +529,54 @@ class TreeService():
             except OSError:
                 pass
 
-        # Compute surname set
-        rody = LineageService(self._file_service)
-        surnames_to_uid, log = rody.compute_lineages(root_uuid)
+        # Compute lineage membership sets
+        service = LineageService(self._file_service)
+        lineages, top_log = service.compute_lineages(root_uuid)
 
-        # Write one shortcut per distinct surname (alphabetically sorted)
         cached = self._file_service.settings.get_cached_people()
-        written = 0
-        for surname in sorted(surnames_to_uid.keys()):
-            uid = surnames_to_uid[surname]
-            target_location = cached.get(uid, {}).get(
-                PersonDataProperty.LOCATION.value, ""
-            )
-            if not target_location:
-                log.append(
-                    f"RODY: surname '{surname}' contributor uid={uid} "
-                    "has no cached location; shortcut skipped."
-                )
-                continue
-            shortcut_path = str(lineage_path / f"{surname}.lnk")
-            ShortcutHelper.create_shortcut(target_location, shortcut_path)
-            written += 1
+        total_written = 0
 
-        # Persist build log
-        log_path = lineage_path / "build-log.txt"
-        log_path.write_text(
-            "\n".join(log) if log else "(no anomalies)\n",
+        for surname in sorted(lineages.keys()):
+            members = lineages[surname]
+            sub_log: List[str] = []
+            sub_dir = lineage_root / encode_lineage_folder_name(surname)
+            sub_dir.mkdir(exist_ok=True)
+
+            seen_filenames: Set[str] = set()
+            for uid in members.member_uids:
+                cached_entry = cached.get(uid, {})
+                location = cached_entry.get(PersonDataProperty.LOCATION.value, "")
+                if not location:
+                    sub_log.append(
+                        f"LINEAGE: member uid={uid} has no cached location; skipped."
+                    )
+                    continue
+                person_name = cached_entry.get(
+                    PersonDataProperty.PERSON_NAME.value, uid
+                )
+                base = encode_person_lnk_name(person_name)
+                candidate = base
+                n = 2
+                while candidate in seen_filenames:
+                    stem = base[:-4]  # strip .lnk
+                    candidate = f"{stem} ({n}).lnk"
+                    n += 1
+                seen_filenames.add(candidate)
+                ShortcutHelper.create_shortcut(location, str(sub_dir / candidate))
+                total_written += 1
+
+            (sub_dir / "build-log.txt").write_text(
+                "\n".join(sub_log) if sub_log else "(no anomalies)\n",
+                encoding="utf-8",
+            )
+
+        # Top-level build log (cross-cutting: enumeration + collision entries)
+        (lineage_root / "build-log.txt").write_text(
+            "\n".join(top_log) if top_log else "(no anomalies)\n",
             encoding="utf-8",
         )
 
-        return written, log
+        return total_written, top_log
 
     def _validate_person_data(self, person_data: PersonDataWrapper):
 
