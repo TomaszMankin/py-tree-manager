@@ -271,3 +271,85 @@ class TestVanishedDraftFallback:
         recreated = ts.load_person_draft(str(draft_path))
         assert recreated["unique_identifier"] == X
         assert recreated["last_name"] == "Wisniewski"
+
+
+# ---------------------------------------------------------------------------
+# Picker exclusion lifecycle regression — _reset_to_add_mode must clear all
+# four pickers' exclusion state after save.  Requires real AddPersonFrame with
+# wx + a tree root so pickers have known data.
+# ---------------------------------------------------------------------------
+
+_wx_app_for_frame_test = None
+_wx_parent_for_frame_test = None
+
+
+def _get_wx_app_for_frame():
+    global _wx_app_for_frame_test, _wx_parent_for_frame_test
+    if _wx_app_for_frame_test is None:
+        import wx
+        _wx_app_for_frame_test = wx.App(False)
+        _wx_parent_for_frame_test = wx.Frame(None)
+    return _wx_parent_for_frame_test
+
+
+class TestResetToAddModeClearsPickerExclusions:
+    """_reset_to_add_mode must leave all four pickers with empty selected and excluded lists."""
+
+    def test_reset_to_add_mode_clears_exclusions_across_all_four_pickers(
+        self, tmp_path, monkeypatch, me_json_factory
+    ):
+        """After selecting X as spouse then calling _reset_to_add_mode, all four pickers
+        must have empty selected_people_uuids AND empty excluded_people_uuids.
+        """
+        import tempfile as _tempfile
+        from src.frames.add_person_frame import AddPersonFrame
+
+        app_tmp = tmp_path / "apptmp"
+        app_tmp.mkdir(exist_ok=True)
+        monkeypatch.setattr(_tempfile, "gettempdir", lambda: str(app_tmp))
+        appdata = tmp_path / "appdata"
+        appdata.mkdir(exist_ok=True)
+        monkeypatch.setenv("LOCALAPPDATA", str(appdata))
+
+        tree_root = tmp_path / "tree"
+        tree_root.mkdir()
+
+        from src.services.tree_service import TreeService
+        from src.wrappers.person_data_wrapper import PersonDataWrapper
+
+        ts = TreeService()
+        ts.set_root_location(str(tree_root))
+
+        # Save three placeholder people so ALL_PEOPLE is non-empty
+        X = "eeee0000-0000-0000-0000-000000000000"
+        Y = "ffff0000-0000-0000-0000-000000000000"
+        Z = "0000aaaa-0000-0000-0000-000000000000"
+        for uid, first, last in [(X, "Alpha", "One"), (Y, "Beta", "Two"), (Z, "Gamma", "Three")]:
+            data = me_json_factory(uid=uid, first_name=first, last_name=last,
+                                   name=f"{first} {last}")
+            ts.save_person_and_add_to_tree(PersonDataWrapper(data))
+
+        parent = _get_wx_app_for_frame()
+        frame = AddPersonFrame(parent)
+
+        # Wire dirty tracking happened in __init__; now callbacks are _on_picker_change.
+        # Set X as spouse so exclusions propagate to the other three pickers.
+        frame.spouses_picker.set_selected_people([X])
+
+        # Pre-condition: parents picker now excludes X
+        assert X in frame.parents_picker.excluded_people_uuids, (
+            "Pre-condition failed: X should be excluded from parents picker after spouse selection"
+        )
+
+        # Act
+        frame._reset_to_add_mode()
+
+        # Assert: all four pickers are fully clear
+        for picker_name in ("parents_picker", "children_picker", "spouses_picker", "siblings_picker"):
+            picker = getattr(frame, picker_name)
+            assert picker.selected_people_uuids == [], (
+                f"{picker_name}.selected_people_uuids must be [] after reset, got {picker.selected_people_uuids}"
+            )
+            assert picker.excluded_people_uuids == [], (
+                f"{picker_name}.excluded_people_uuids must be [] after reset, got {picker.excluded_people_uuids}"
+            )
