@@ -176,19 +176,21 @@ class MultiPersonPickerControl(wx.Panel):
         self.selected_list.Clear()
         self.selected_people_uuids.clear()
 
-        if not ids or len(ids) == 0:
-            return
+        # Pre-validate so partial-population state cannot leak on error.
+        if ids:
+            for person_id in ids:
+                if person_id not in self.all_people:
+                    raise RuntimeError(
+                        f"Person with id <{person_id}> has not been found in the tree."
+                    )
+            for person_id in ids:
+                self.selected_people_uuids.append(person_id)
+                self.selected_list.Append(self.all_people[person_id], person_id)
 
-        for id in ids:
-
-            if id not in self.all_people:
-                raise RuntimeError(f"Person with id <{id}> has not been found in the tree.")
-
-            self.selected_people_uuids.append(id)
-            self.selected_list.Append(self.all_people[id], id)
-
+        # Refresh visible results regardless — selection state changed.
         self.on_search(None)
 
+        # Fire callback unconditionally — callers depend on this for exclusion sync.
         if self.on_change_callback is not None:
             self.on_change_callback()
 
