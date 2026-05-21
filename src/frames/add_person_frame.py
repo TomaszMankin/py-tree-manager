@@ -1666,6 +1666,12 @@ class AddPersonFrame(wx.Frame):
         self.spouses_picker.set_selected_people([])
         self.siblings_picker.set_selected_people([])
 
+        # Defensive: even with the picker callback contract fix, explicitly
+        # recompute exclusions so reset correctness does not depend on each
+        # picker firing its callback. Idempotent — all four selection sets are
+        # empty at this point, so the recomputed cross-set is empty everywhere.
+        self.update_all_picker_exclusions()
+
         # Mode UI — use state machine; sets _menu_mode + visuals
         self.SetTitle("Dodaj osobę do drzewa")
         self._apply_menu_mode(MenuMode.NEW)

@@ -605,7 +605,7 @@ def _build_logging_app_class():
             # Copy update.bat from PyInstaller bundle into exe_dir on first
             # frozen launch. No-op in dev mode.
             try:
-                from helpers.update_helper import UpdateHelper  # noqa: PLC0415
+                from src.helpers.update_helper import UpdateHelper  # noqa: PLC0415
                 UpdateHelper.ensure_update_helper_present()
             except Exception as e:
                 log_error(e, context="OnInit: ensure_update_helper_present failed")
@@ -632,7 +632,7 @@ def _build_logging_app_class():
             # Check for update after frame.Show() so the user sees the window
             # first; the update dialog appears on top.
             try:
-                from helpers.update_helper import UpdateHelper  # noqa: PLC0415
+                from src.helpers.update_helper import UpdateHelper  # noqa: PLC0415
                 from src.services.file_service import FileService  # noqa: PLC0415
                 from importlib.metadata import version as _pkg_version  # noqa: PLC0415
                 fs2 = FileService()

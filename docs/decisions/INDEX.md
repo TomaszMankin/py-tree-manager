@@ -20,6 +20,7 @@
 | ADR-014 | Self-replace update_helper mechanism — `.bat` helper with retry-on-lock and silent relaunch | accepted | 2026-05-12 |
 | ADR-015 | Migrate hosting + CI from Bitbucket Pipelines to GitHub Actions + GitHub Releases | accepted | 2026-05-17 |
 | ADR-016 | Lineage folders — surname-grouped subfolders with descendant + ancestor membership (supersedes ADR-004) | accepted | 2026-05-17 |
+| ADR-017 | Picker exclusion lifecycle — `set_selected_people` MUST fire `on_change_callback` on every state mutation (extends ADR-011) | accepted | 2026-05-19 |
 
 ## Conventions
 
