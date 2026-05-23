@@ -78,7 +78,7 @@ def _make_frame(tmp_path: Path, monkeypatch) -> AddPersonFrame:
 # ---------------------------------------------------------------------------
 
 class TestDayDropdownWidgetType:
-    """Day dropdown must be wx.adv.OwnerDrawnComboBox after the Sprint-19 swap."""
+    """Day dropdown must be wx.adv.OwnerDrawnComboBox (issue #8 fix)."""
 
     def test_day_dropdown_is_owner_drawn_combo_box(self, tmp_path, monkeypatch):
         """birth_date_picker['day'] must be wx.adv.OwnerDrawnComboBox."""
@@ -152,5 +152,5 @@ class TestDayDropdownWidgetType:
             )
             assert not isinstance(picker, wx.adv.OwnerDrawnComboBox), (
                 f"birth_date_picker['{key}'] must NOT be OwnerDrawnComboBox — "
-                "the sprint-19 swap is day-only"
+                "the day-only swap must not affect other date dropdowns"
             )
