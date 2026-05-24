@@ -2,6 +2,7 @@
 from typing import Any, Callable, List, Tuple, Dict, Optional
 import uuid
 import wx
+import wx.adv
 import re
 
 from src.frames.controls.auto_resize_text_box_control import AutoResizeTextCtrl
@@ -15,6 +16,15 @@ from src.services.tree_service import TreeService
 import json
 from src.helpers.logger import log_user_action, set_current_person_label, log_error, init_logging, log_cleanup_failure, PERSON_PLACEHOLDER
 from src.frames.menu_state import MenuMode, compute_menu_state
+
+# Issue #8: day dropdown popup must scroll, not screen-clip.  wx.ComboBox uses
+# the native Win32 ComboBox whose popup is positioned by the OS and clipped at
+# the screen edge — at font_size=20 with 33 items the popup overflows 1920x1080
+# screens and days 25-31 become unreachable.  wx.adv.OwnerDrawnComboBox uses an
+# internal VListBox popup whose height SetPopupMaxHeight caps, forcing a
+# scrollbar regardless of screen position.  400 px ≈ 10 rows at font_size=20.
+DAY_DROPDOWN_POPUP_MAX_HEIGHT_PX = 400
+
 
 class AddPersonFrame(wx.Frame):
     """
@@ -773,7 +783,14 @@ class AddPersonFrame(wx.Frame):
         date_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
         days = ["Dzień", "XX"] + [str(i).rjust(2, "0") for i in range(1, 32)]
-        day_dropdown, _ = self._create_dropdown_control(parent, days, font_size, with_sizer=False)
+        day_dropdown = wx.adv.OwnerDrawnComboBox(
+            parent, choices=days, style=wx.CB_READONLY
+        )
+        day_font = day_dropdown.GetFont()
+        day_font.SetPointSize(font_size)
+        day_dropdown.SetFont(day_font)
+        day_dropdown.SetPopupMaxHeight(DAY_DROPDOWN_POPUP_MAX_HEIGHT_PX)
+        day_dropdown.Select(0)
 
         months = ["Miesiąc", "XX"] + [str(i).rjust(2, "0") for i in range(1, 13)]
         month_dropdown, _ = self._create_dropdown_control(parent, months, font_size, with_sizer=False)
