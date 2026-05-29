@@ -1546,33 +1546,35 @@ class AddPersonFrame(wx.Frame):
 
     @log_user_action("Open person for edit")
     def on_open_person_click(self, event: wx.Event) -> None:
-        dialog = wx.DirDialog(
-            self,
-            message="Wybierz folder osoby do edycji",
-            defaultPath=self._tree_service.get_people_folder(),
-            style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST
-        )
-        if dialog.ShowModal() == wx.ID_OK:
+        while True:
+            dialog = wx.DirDialog(
+                self,
+                message="Wybierz folder osoby do edycji",
+                defaultPath=self._tree_service.get_people_folder(),
+                style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST
+            )
+            if dialog.ShowModal() != wx.ID_OK:
+                dialog.Destroy()
+                return
             folder_path = dialog.GetPath()
             dialog.Destroy()
 
             if not (Path(folder_path) / "me.json").exists():
                 polish_dialog(
                     self,
-                    "Wybrany folder nie zawiera pliku osoby. Wybierz inny folder.",
+                    "Wybrany folder nie zawiera informacji o żadnej osobie. Wybierz osobę bezpośrednio z folderu \"Lista osób\", nie głębiej.",
                     "Błąd odczytu",
                     wx.OK | wx.ICON_WARNING,
                 )
-                return
+                continue  # re-show dialog
 
+            break  # valid folder, proceed
 
-            try:
-                self._load_person_for_edit(folder_path)
-            except Exception as e:
-                log_error(e, context="Open person for edit: load failed")
-                polish_dialog(self, str(e), "Błąd odczytu", wx.OK | wx.ICON_ERROR)
-        else:
-            dialog.Destroy()
+        try:
+            self._load_person_for_edit(folder_path)
+        except Exception as e:
+            log_error(e, context="Open person for edit: load failed")
+            polish_dialog(self, str(e), "Błąd odczytu", wx.OK | wx.ICON_ERROR)
 
     def _load_person_for_edit(self, folder_path: str) -> None:
         me_json_path = Path(folder_path) / "me.json"
