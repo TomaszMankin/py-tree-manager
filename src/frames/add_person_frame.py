@@ -798,21 +798,21 @@ class AddPersonFrame(wx.Frame):
         Returns:
             Tuple of:
             - Dictionary with keys: 'day', 'month', 'year_century', 'year_decade',
-              'year_unit', 'przed', 'okolo'
+              'year_unit', 'before_date', 'approx'
             - BoxSizer containing the checkboxes row + 5 dropdowns row, stacked vertically
         """
         outer_sizer = wx.BoxSizer(wx.VERTICAL)
 
         # ── Checkbox row: [Przed] [Około] ─────────────────────────────────────
         checkbox_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        przed_checkbox = wx.CheckBox(parent, label="Przed")
-        okolo_checkbox = wx.CheckBox(parent, label="Około")
-        przed_font = przed_checkbox.GetFont()
-        przed_font.SetPointSize(font_size)
-        przed_checkbox.SetFont(przed_font)
-        okolo_checkbox.SetFont(przed_font)
-        checkbox_sizer.Add(przed_checkbox, 0, wx.RIGHT, 8)
-        checkbox_sizer.Add(okolo_checkbox, 0)
+        before_date_checkbox = wx.CheckBox(parent, label="Przed")
+        approx_checkbox = wx.CheckBox(parent, label="Około")
+        checkbox_font = before_date_checkbox.GetFont()
+        checkbox_font.SetPointSize(font_size)
+        before_date_checkbox.SetFont(checkbox_font)
+        approx_checkbox.SetFont(checkbox_font)
+        checkbox_sizer.Add(before_date_checkbox, 0, wx.RIGHT, 8)
+        checkbox_sizer.Add(approx_checkbox, 0)
 
         # ── Date dropdowns row ────────────────────────────────────────────────
         date_sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -854,8 +854,8 @@ class AddPersonFrame(wx.Frame):
             'year_century': century_dropdown,
             'year_decade': decade_dropdown,
             'year_unit': year_dropdown,
-            'przed': przed_checkbox,
-            'okolo': okolo_checkbox,
+            'before_date': before_date_checkbox,
+            'approx': approx_checkbox,
         }
 
         return date_dropdowns_dict, outer_sizer
@@ -1727,7 +1727,7 @@ class AddPersonFrame(wx.Frame):
 
         # Date pickers (both birth and death) — index 0 is the placeholder hint.
         # Each picker dict contains wx.ComboBox / wx.adv.OwnerDrawnComboBox entries
-        # plus wx.CheckBox entries ('przed', 'okolo') — handle separately.
+        # plus wx.CheckBox entries ('before_date', 'approx') — handle separately.
         for key, ctrl in self.birth_date_picker.items():
             if isinstance(ctrl, wx.CheckBox):
                 ctrl.SetValue(False)
@@ -1942,16 +1942,16 @@ class AddPersonFrame(wx.Frame):
 
         birth_date = self._build_optional_date(
             self.birth_date_picker,
-            okolo=self.birth_date_picker['okolo'].GetValue(),
-            przed=self.birth_date_picker['przed'].GetValue(),
+            approx=self.birth_date_picker['approx'].GetValue(),
+            before_date=self.birth_date_picker['before_date'].GetValue(),
         )
         output.set_date_of_birth(birth_date if birth_date else '')
 
         if self.is_dead_checkbox.GetValue():
             death_date = self._build_optional_date(
                 self.death_date_picker,
-                okolo=self.death_date_picker['okolo'].GetValue(),
-                przed=self.death_date_picker['przed'].GetValue(),
+                approx=self.death_date_picker['approx'].GetValue(),
+                before_date=self.death_date_picker['before_date'].GetValue(),
             )
             output.set_date_of_death(death_date if death_date else '')
         else:
@@ -2030,8 +2030,8 @@ class AddPersonFrame(wx.Frame):
         self.birth_date_picker['year_century'].SetValue(birth_date[2])
         self.birth_date_picker['year_decade'].SetValue(birth_date[3])
         self.birth_date_picker['year_unit'].SetValue(birth_date[4])
-        self.birth_date_picker['okolo'].SetValue(birth_date[5])
-        self.birth_date_picker['przed'].SetValue(birth_date[6])
+        self.birth_date_picker['approx'].SetValue(birth_date[5])
+        self.birth_date_picker['before_date'].SetValue(birth_date[6])
 
         raw_death_date: bool | None = person_data_wrapper.get_date_of_death()
         self.is_dead_checkbox.SetValue(bool(raw_death_date))
@@ -2049,16 +2049,16 @@ class AddPersonFrame(wx.Frame):
             self.death_date_picker['year_decade'].Enable(True)
             self.death_date_picker['year_unit'].SetValue(death_date[4])
             self.death_date_picker['year_unit'].Enable(True)
-            self.death_date_picker['okolo'].SetValue(death_date[5])
-            self.death_date_picker['okolo'].Enable(True)
-            self.death_date_picker['przed'].SetValue(death_date[6])
-            self.death_date_picker['przed'].Enable(True)
+            self.death_date_picker['approx'].SetValue(death_date[5])
+            self.death_date_picker['approx'].Enable(True)
+            self.death_date_picker['before_date'].SetValue(death_date[6])
+            self.death_date_picker['before_date'].Enable(True)
     
     def _deconstruct_optional_date(self, date: str | None) -> Tuple[str, str, str, str, str, bool, bool]:
         """Parse a stored date string into its constituent parts plus prefix flags.
 
-        Returns a 7-tuple: (day, month, century, decade, unit, okolo, przed).
-        Backward-compatible: a bare "YYYY-MM-DD" returns okolo=False, przed=False.
+        Returns a 7-tuple: (day, month, century, decade, unit, approx, before_date).
+        Backward-compatible: a bare "YYYY-MM-DD" returns approx=False, before_date=False.
         Prefix markers: ~ = Około, < = Przed, order [~][<] but parser
         accepts any order via the [~<]* character class.
         """
@@ -2069,12 +2069,12 @@ class AddPersonFrame(wx.Frame):
         prefix_match = re.match(r'^([~<]*)(.*)', date)
         prefix = prefix_match.group(1)
         body = prefix_match.group(2)
-        okolo = '~' in prefix
-        przed = '<' in prefix
+        approx = '~' in prefix
+        before_date = '<' in prefix
 
         optional_date = re.match(r"[X0-9]{4}-[X0-9]{2}-[X0-9]{2}", body)
         if not optional_date:
-            return ('XX', 'XX', 'XX', 'X', 'X', okolo, przed)
+            return ('XX', 'XX', 'XX', 'X', 'X', approx, before_date)
 
         found_strings = optional_date.group().split('-')
 
@@ -2084,16 +2084,16 @@ class AddPersonFrame(wx.Frame):
         decade = found_strings[0][2:3]
         year = found_strings[0][3:]
 
-        return (day, month, century, decade, year, okolo, przed)
+        return (day, month, century, decade, year, approx, before_date)
 
     def _build_optional_date(
         self,
         date_picker: Dict[str, wx.ComboBox],
-        okolo: bool = False,
-        przed: bool = False,
+        approx: bool = False,
+        before_date: bool = False,
     ) -> Optional[str]:
         # Check if ANY dropdown value was selected (not all hints).
-        # Only inspect dropdown keys, not checkbox keys ('przed', 'okolo').
+        # Only inspect dropdown keys, not checkbox keys ('before_date', 'approx').
         dropdown_keys = ('day', 'month', 'year_century', 'year_decade', 'year_unit')
         any_selected = any(date_picker[key].GetSelection() > 0 for key in dropdown_keys)
 
@@ -2109,7 +2109,7 @@ class AddPersonFrame(wx.Frame):
         month = get('month', 'XX')
         day = get('day', 'XX')
 
-        prefix = ("~" if okolo else "") + ("<" if przed else "")
+        prefix = ("~" if approx else "") + ("<" if before_date else "")
         return f"{prefix}{year}-{month}-{day}"
 
 
