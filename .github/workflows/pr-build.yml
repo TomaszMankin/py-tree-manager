@@ -93,7 +93,7 @@ jobs:
         run: |
           $version = "${{ steps.version.outputs.pr_version }}"
           Copy-Item "dist/py-tree-manager-$version.exe" "dist/PyTreeManager.exe"
-          & "C:\Program Files (x86)\Inno Setup 6\iscc.exe" /DMyAppVersion=$version installer/py-tree-manager.iss
+          iscc /DMyAppVersion=$version installer/py-tree-manager.iss
           Write-Host "Installer build OK"
 
       - name: Publish prerelease

@@ -75,7 +75,7 @@ jobs:
         run: |
           $version = "${{ steps.bump.outputs.new_version }}"
           Copy-Item "dist/py-tree-manager-$version.exe" "dist/PyTreeManager.exe" -Force
-          & "C:\Program Files (x86)\Inno Setup 6\iscc.exe" /DMyAppVersion=$version installer/py-tree-manager.iss
+          iscc /DMyAppVersion=$version installer/py-tree-manager.iss
 
       - name: Publish release
         run: |
