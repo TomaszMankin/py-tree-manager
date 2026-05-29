@@ -274,7 +274,7 @@ class AddPersonFrame(wx.Frame):
         self.other_first_names_text_box: AutoResizeTextCtrl = self._add_form_field(
             basic_info_grid, 
             row=2, 
-            label_text="Pozostałe imiona:",
+            label_text="Inne imiona:",
             control_creator=lambda parent: self._create_multi_line_text_control(
                 parent, 
                 "Wpisz kolejne imiona, każde w nowej linii...", 
