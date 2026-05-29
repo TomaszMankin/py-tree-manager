@@ -82,7 +82,7 @@ jobs:
           $version = "${{ steps.bump.outputs.new_version }}"
           gh release create "v$version" `
             "dist/py-tree-manager-$version.exe" `
-            "installer_output/PyTreeManager-Setup-$version.exe" `
+            "dist/PyTreeManager-Setup-$version.exe" `
             --latest `
             --target "${{ github.sha }}" `
             --title "v$version" `
