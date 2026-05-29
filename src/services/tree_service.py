@@ -495,8 +495,15 @@ class TreeService():
     def rebuild_lineage(self) -> Tuple[int, List[str]]:
         """Wipe <root>/Rody/ and rebuild from the current Drzewo root-person UUID.
 
-        Rody shares the root anchor with Drzewo. Creates one subfolder per
-        distinct lineage surname, each containing .lnk files for all members.
+        One hourglass, two views:
+        1. FolderTreeService.compute_membership is called once to get the full
+           Drzewo hourglass (List[FolderTreeMember]) with global generation /
+           couple / gender tokens.
+        2. LineageService.compute_lineages groups those members by surname —
+           tokens carried through UNCHANGED (no recomputation, no reindex).
+        3. Each .lnk is named via render_folder_tree_filename (Drzewo encoder
+           reused verbatim), guaranteeing identical encoded prefix in Drzewo
+           and Rody for the same person.
 
         Returns:
             (count_written, build_log_messages)
@@ -504,10 +511,13 @@ class TreeService():
         Raises:
             RuntimeError: if no Drzewo root person is set in settings.
         """
+        from src.services.folder_tree_service import (
+            FolderTreeService,
+            render_folder_tree_filename,
+        )
         from src.services.lineage_service import (
             LineageService,
             encode_lineage_folder_name,
-            encode_person_lnk_name,
         )
 
         root_uuid = self._file_service.get_folder_tree_root_uuid()
@@ -529,40 +539,42 @@ class TreeService():
             except OSError:
                 pass
 
-        # Compute lineage membership sets
-        service = LineageService(self._file_service)
-        lineages, top_log = service.compute_lineages(root_uuid)
+        # Step 1: compute Drzewo membership ONCE — single generation authority
+        drzewo = FolderTreeService(self._file_service)
+        members, membership_log = drzewo.compute_membership(root_uuid)
 
-        cached = self._file_service.settings.get_cached_people()
+        # Step 2: group Drzewo members by surname (generation/couple/gender unchanged)
+        lineage_svc = LineageService(self._file_service)
+        lineages, assignment_log = lineage_svc.compute_lineages(members)
+
+        top_log = membership_log + assignment_log
         total_written = 0
 
+        # Step 3: wipe-and-rebuild Rody/<surname>/ folders
         for surname in sorted(lineages.keys()):
-            members = lineages[surname]
+            surname_members = lineages[surname]
             sub_log: List[str] = []
             sub_dir = lineage_root / encode_lineage_folder_name(surname)
             sub_dir.mkdir(exist_ok=True)
 
             seen_filenames: Set[str] = set()
-            for uid in members.member_uids:
-                cached_entry = cached.get(uid, {})
-                location = cached_entry.get(PersonDataProperty.LOCATION.value, "")
-                if not location:
+            for member in surname_members:
+                if not member.location:
                     sub_log.append(
-                        f"LINEAGE: member uid={uid} has no cached location; skipped."
+                        f"LINEAGE: member uid={member.uid} has no location; skipped."
                     )
                     continue
-                person_name = cached_entry.get(
-                    PersonDataProperty.PERSON_NAME.value, uid
-                )
-                base = encode_person_lnk_name(person_name)
-                candidate = base
+
+                # .lnk filename from Drzewo encoder — same token as Drzewo folder
+                fname = render_folder_tree_filename(member)
+                candidate = fname
                 n = 2
                 while candidate in seen_filenames:
-                    stem = base[:-4]  # strip .lnk
-                    candidate = f"{stem} ({n}).lnk"
+                    stem, ext = candidate[:-4], candidate[-4:]  # strip .lnk
+                    candidate = f"{stem} ({n}){ext}"
                     n += 1
                 seen_filenames.add(candidate)
-                ShortcutHelper.create_shortcut(location, str(sub_dir / candidate))
+                ShortcutHelper.create_shortcut(member.location, str(sub_dir / candidate))
                 total_written += 1
 
             (sub_dir / "build-log.txt").write_text(
@@ -570,7 +582,7 @@ class TreeService():
                 encoding="utf-8",
             )
 
-        # Top-level build log (cross-cutting: enumeration + collision entries)
+        # Top-level build log
         (lineage_root / "build-log.txt").write_text(
             "\n".join(top_log) if top_log else "(no anomalies)\n",
             encoding="utf-8",
