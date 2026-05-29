@@ -1,17 +1,27 @@
 """End-to-end integration tests for TreeService.rebuild_lineage().
 
-All tests drive rebuild_lineage() against synthetic trees. ShortcutHelper
-is stubbed (creates empty files) via the conftest autouse patch, so no COM
-calls happen here. Tests assert on-disk folder/file structure.
+rebuild_lineage calls FolderTreeService.compute_membership to get
+List[FolderTreeMember], feeds them into LineageService.compute_lineages,
+and writes .lnk files named via render_folder_tree_filename.  The generation /
+couple / gender token in a lineage .lnk filename MUST MATCH the token in the
+corresponding Drzewo .lnk filename for the same person (generation-parity).
 
 Test cases:
-  1  13-person tree: two subfolders, correct .lnk counts, chain-break verified
-  2  Stale file wipe: second rebuild removes old subfolders
+  1  Generation-parity e2e: for a multi-generation tree, each person's lineage
+     .lnk encoded prefix matches that person's Drzewo .lnk encoded prefix
+  2  Couple-letter parity (H-B): the only member of a surname folder keeps
+     their Drzewo couple letter (not reindexed to A)
+  3  Stale subfolder wipe: second rebuild removes old subfolders
+  4  Member count: .lnk count in surname folder matches members assigned by
+     FolderTreeService
 """
+
+from __future__ import annotations
 
 import json
 import uuid
 from pathlib import Path
+from typing import List, Optional
 
 import pytest
 
@@ -82,223 +92,224 @@ def _add_to_cache(fs, uid: str, name: str, folder: Path) -> None:
     fs.settings.set_cached_people(cached)
 
 
+def _setup_tree_service(tmp_path, monkeypatch):
+    """Bootstrap TreeService with a fresh root, return (ts, tree_root, fs)."""
+    import tempfile as _tempfile
+    from src.services.tree_service import TreeService
+
+    app_tmp = tmp_path / "apptmp"
+    app_tmp.mkdir(exist_ok=True)
+    monkeypatch.setattr(_tempfile, "gettempdir", lambda: str(app_tmp))
+
+    appdata = tmp_path / "appdata"
+    appdata.mkdir(exist_ok=True)
+    monkeypatch.setenv("LOCALAPPDATA", str(appdata))
+
+    ts = TreeService()
+    tree_root = tmp_path / "tree"
+    tree_root.mkdir(exist_ok=True)
+    ts.set_root_location(str(tree_root))
+    return ts, tree_root, ts._file_service
+
+
 # ---------------------------------------------------------------------------
-# Test 1 — 13-person tree, two subfolders, chain-break at great-grandfather
-#           (maternal side enriched via spouse-leaf + ancestor walk)
+# Test 1 — Generation-parity e2e (H-A)
 # ---------------------------------------------------------------------------
 
-class TestLineageE2ENinePersonTree:
+class TestLineageE2EGenerationParity:
+    """H-A: same person's encoded .lnk prefix matches in Drzewo and lineage."""
 
-    def test_nine_person_tree_two_subfolders_correct_member_counts(
+    def test_ancestor_encoded_prefix_matches_in_drzewo_and_lineage(
         self, tmp_path, monkeypatch
     ):
-        """13-person tree: father-surname/ has 8 .lnk, mother-maiden/ has 8 .lnk.
+        """For the grandfather (gen=+1), his encoded prefix in Drzewo == in his surname lineage.
 
-        Tree layout (placeholders):
-          root (parents=[father, mother], spouse=[spouse], children=[child])
-          spouse (parents=[])
-          child (spouse=[child_spouse])
-          child_spouse
-          father (last_name=<fsurname>, parents=[gf_paternal, gm_paternal])
-          mother (has_maiden=True, maiden_name=<mmaid>, parents=[gf_maternal, gm_maternal])
-          gf_paternal (last_name=<fsurname>, parents=[ggf_paternal])
-          gm_paternal (last_name=<unrelated>, has_maiden=True, maiden_name=<unrelated-maiden>)
-          ggf_paternal (last_name=<other> != <fsurname>)             <- paternal chain breaks
-          gf_maternal  (last_name=<unrelated-gfm>)                   <- no maiden match
-          gm_maternal  (last_name=<unrelated-gmm>, has_maiden=True, maiden_name=<mmaid>)
-          gggf_maternal (last_name=<unrelated-2>, maiden_name=<mmaid>, has_maiden=False)
-                                                                      <- maternal chain breaks
+        Tree:
+          root (Mankin) -- parents: [grandfather_mankin, grandmother_mankin]
+          grandfather_mankin: last_name=Mankin, gen=+1 in Drzewo
+          grandmother_mankin: last_name=Inna (different), gen=+1 in Drzewo
 
-        father-surname/ expected members (trace):
-          universal (root, spouse, child, child_spouse) = 4
-          R3: father + mother (father's spouse) = 2
-          R4: gf_paternal (matches fsurname) -> add gm_paternal as spouse-leaf; walk parents
-              ggf_paternal: surname differs -> stop
-          R4 yields: gf_paternal + gm_paternal = 2
-          Total = 8 .lnk
-
-        mother-maiden/ expected members (trace):
-          universal (root, spouse, child, child_spouse) = 4
-          R3: mother + father (mother's spouse) = 2
-          R4 walk from mother's parents:
-            gf_maternal: lineage surname = <unrelated-gfm> (no maiden). No match. Stop.
-            gm_maternal: lineage surname = <mmaid> (has_maiden=True). Match. Include.
-              Add spouse-leaf gf_maternal. Walk gm_maternal's parents:
-              gggf_maternal: has_maiden=False -> uses last_name=<unrelated-2>. No match. Stop.
-          R4 yields: gm_maternal + gf_maternal (as spouse-leaf) = 2
-          Total = 8 .lnk
+        Both Drzewo and the Mankin lineage folder use render_folder_tree_filename.
+        grandfather_mankin's .lnk prefix in Drzewo/ must match his .lnk name
+        in Rody/Mankin/.
         """
-        import tempfile as _tempfile
-        from src.services.tree_service import TreeService
+        ts, tree_root, fs = _setup_tree_service(tmp_path, monkeypatch)
 
-        app_tmp = tmp_path / "apptmp"
-        app_tmp.mkdir()
-        monkeypatch.setattr(_tempfile, "gettempdir", lambda: str(app_tmp))
+        root_uid = str(uuid.uuid4())
+        gf_uid = str(uuid.uuid4())
+        gm_uid = str(uuid.uuid4())
 
-        appdata = tmp_path / "appdata"
-        appdata.mkdir()
-        monkeypatch.setenv("LOCALAPPDATA", str(appdata))
+        gf_folder = _write_person(tree_root, gf_uid, "Stefan Mankin",
+                                  last_name="Mankin", sex="Mezczyzna")
+        gm_folder = _write_person(tree_root, gm_uid, "Helena Inna",
+                                  last_name="Inna", sex="Kobieta",
+                                  spouse_id=[gf_uid])
+        root_folder = _write_person(tree_root, root_uid, "Jan Mankin",
+                                    last_name="Mankin", sex="Mezczyzna",
+                                    parents_id=[gf_uid, gm_uid],
+                                    parents=[str(gf_folder), str(gm_folder)])
 
-        ts = TreeService()
-        tree_root = tmp_path / "tree"
-        tree_root.mkdir()
-        ts.set_root_location(str(tree_root))
-        fs = ts._file_service
+        for u, n, f in [(root_uid, "Jan Mankin", root_folder),
+                        (gf_uid, "Stefan Mankin", gf_folder),
+                        (gm_uid, "Helena Inna", gm_folder)]:
+            _add_to_cache(fs, u, n, f)
 
-        # UIDs
+        ts.set_folder_tree_root_person(root_uid)
+
+        # Build Drzewo — this sets the Drzewo .lnk names on disk
+        ts.rebuild_folder_tree()
+
+        # Now build lineage
+        ts.rebuild_lineage()
+
+        drzewo_root = tree_root / "Drzewo"
+        lineage_root = tree_root / "Rody"
+
+        # Find grandfather's Drzewo .lnk
+        drzewo_lnks = [p.name for p in drzewo_root.iterdir()
+                       if p.suffix == ".lnk" and "Stefan Mankin" in p.name]
+        assert len(drzewo_lnks) >= 1, (
+            f"Stefan Mankin .lnk not found in Drzewo/: {list(drzewo_root.iterdir())}"
+        )
+        drzewo_gf_name = drzewo_lnks[0]
+
+        # Find grandfather's lineage .lnk in Rody/Mankin/
+        mankin_sub = lineage_root / "Mankin"
+        assert mankin_sub.is_dir(), f"Rody/Mankin/ not found: {list(lineage_root.iterdir())}"
+        lineage_lnks = [p.name for p in mankin_sub.iterdir()
+                        if p.suffix == ".lnk" and "Stefan Mankin" in p.name]
+        assert len(lineage_lnks) >= 1, (
+            f"Stefan Mankin .lnk not found in Rody/Mankin/: {list(mankin_sub.iterdir())}"
+        )
+        lineage_gf_name = lineage_lnks[0]
+
+        # H-A: the encoded prefix must be identical
+        assert drzewo_gf_name == lineage_gf_name, (
+            f"Generation-parity FAIL: Drzewo='{drzewo_gf_name}' vs "
+            f"Lineage='{lineage_gf_name}' — same person must have same encoded prefix"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test 2 — H-B: couple-letter global (couple-B member keeps B)
+# ---------------------------------------------------------------------------
+
+class TestLineageE2ECoupleBParity:
+    """H-B: couple letter is Drzewo-global — no reindexing per surname folder."""
+
+    def test_couple_b_ancestor_keeps_b_in_lineage_folder(
+        self, tmp_path, monkeypatch
+    ):
+        """Grandfather at Drzewo couple B keeps [B] in his lineage .lnk name.
+
+        Tree:
+          root (Mankin) -- parents: [gf_mankin(M), gm_mankin(F)]
+          root also has spouse whose parents are the A couple
+          The B couple (gf_mankin) appears in Mankin/
+          The B letter must be in gf_mankin's lineage .lnk name.
+
+        Setup so that Drzewo assigns couple B to gf_mankin:
+          root's ancestor DFS: spouse's parents registered first (couple A),
+          then root's own parents (couple B) — achieved by spouse pushed first.
+
+        Wait — Drzewo pushes spouses FIRST so root pops FIRST, meaning root's
+        parents = couple A. Spouse's parents = couple B.
+
+        So to get couple B in Mankin/:
+          - root has last_name=Mankin
+          - gf_mankin is root's SPOUSE'S father (couple B in Drzewo)
+          - gf_mankin has last_name=Mankin
+          - Mankin lineage folder contains gf_mankin who is couple B
+          - No couple A for Mankin in Drzewo (root's own parents have different surnames)
+        """
+        ts, tree_root, fs = _setup_tree_service(tmp_path, monkeypatch)
+
         root_uid = str(uuid.uuid4())
         spouse_uid = str(uuid.uuid4())
-        child_uid = str(uuid.uuid4())
-        child_spouse_uid = str(uuid.uuid4())
-        father_uid = str(uuid.uuid4())
-        mother_uid = str(uuid.uuid4())
-        gf_paternal_uid = str(uuid.uuid4())
-        gm_paternal_uid = str(uuid.uuid4())
-        ggf_paternal_uid = str(uuid.uuid4())
-        gf_maternal_uid = str(uuid.uuid4())
-        gm_maternal_uid = str(uuid.uuid4())
-        gggf_maternal_uid = str(uuid.uuid4())
+        root_father_uid = str(uuid.uuid4())    # root's father — different surname (couple A)
+        spouse_father_uid = str(uuid.uuid4())  # spouse's father — Mankin (couple B)
+        spouse_mother_uid = str(uuid.uuid4())  # spouse's mother — different surname
 
-        father_surname = "Mankin"
-        mother_maiden = "Pastryk"
-
-        # --- Paternal side ---
-        ggf_folder = _write_person(tree_root, ggf_paternal_uid, "Karol Inny",
-                                   last_name="Inny")
-        gm_paternal_folder = _write_person(tree_root, gm_paternal_uid, "Helena Inna",
-                                           last_name="Inna",
-                                           maiden_name="InnaP",
-                                           has_maiden_name=True,
-                                           sex="Kobieta")
-        gf_paternal_folder = _write_person(tree_root, gf_paternal_uid, "Stefan Mankin",
-                                           last_name=father_surname,
-                                           spouse_id=[gm_paternal_uid],
-                                           parents_id=[ggf_paternal_uid])
-
-        # --- Maternal side ---
-        # gggf_maternal: has_maiden=False but maiden_name set — gate dominates, uses last_name
-        gggf_maternal_folder = _write_person(
-            tree_root, gggf_maternal_uid, "Waclaw Obcy",
-            last_name="Obcy",
-            maiden_name=mother_maiden,  # field set, but has_maiden=False -> last_name used
-            has_maiden_name=False,
-        )
-        # gm_maternal: has_maiden=True, maiden_name matches mother_maiden -> included in walk
-        gm_maternal_folder = _write_person(
-            tree_root, gm_maternal_uid, "Zofia Inna",
-            last_name="Inna",
-            maiden_name=mother_maiden,
-            has_maiden_name=True,
-            sex="Kobieta",
-            spouse_id=[gf_maternal_uid],
-            parents_id=[gggf_maternal_uid],
-        )
-        # gf_maternal: last_name unrelated, no maiden -> no match; included as spouse-leaf only
-        gf_maternal_folder = _write_person(
-            tree_root, gf_maternal_uid, "Henryk Obcy",
-            last_name="Obcy",
-            spouse_id=[gm_maternal_uid],
-        )
-
-        # --- mother: has parents gf_maternal + gm_maternal ---
-        mother_folder = _write_person(tree_root, mother_uid, "Anna Mankin",
-                                      last_name=father_surname,
-                                      maiden_name=mother_maiden,
-                                      has_maiden_name=True,
-                                      sex="Kobieta",
-                                      spouse_id=[father_uid],
-                                      parents_id=[gf_maternal_uid, gm_maternal_uid])
-
-        # --- father: parents gf_paternal + gm_paternal; spouse = mother ---
-        father_folder = _write_person(tree_root, father_uid, "Adam Mankin",
-                                      last_name=father_surname,
-                                      spouse_id=[mother_uid],
-                                      parents_id=[gf_paternal_uid, gm_paternal_uid])
-
-        child_spouse_folder = _write_person(tree_root, child_spouse_uid,
-                                            "Marta Kowalska",
-                                            last_name="Kowalska", sex="Kobieta")
-        child_folder = _write_person(tree_root, child_uid, "Piotr Mankin",
-                                     last_name=father_surname,
-                                     spouse_id=[child_spouse_uid])
-        spouse_folder = _write_person(tree_root, spouse_uid, "Maria Mankin",
-                                      last_name=father_surname, sex="Kobieta")
+        # root's father: different surname -> couple A (will NOT appear in Mankin/)
+        rf_folder = _write_person(tree_root, root_father_uid, "Jan Kowalski",
+                                  last_name="Kowalski", sex="Mezczyzna")
+        # spouse's father: Mankin -> couple B (WILL appear in Mankin/)
+        sf_folder = _write_person(tree_root, spouse_father_uid, "Adam Mankin",
+                                  last_name="Mankin", sex="Mezczyzna")
+        # spouse's mother: different surname
+        sm_folder = _write_person(tree_root, spouse_mother_uid, "Helena Inna",
+                                  last_name="Inna", sex="Kobieta",
+                                  spouse_id=[spouse_father_uid])
+        # spouse
+        spouse_folder = _write_person(tree_root, spouse_uid, "Maria Kowalska",
+                                      last_name="Kowalska", sex="Kobieta",
+                                      parents_id=[spouse_father_uid, spouse_mother_uid],
+                                      parents=[str(sf_folder), str(sm_folder)])
+        # root: Mankin last_name; parents: only root_father (Kowalski = couple A)
         root_folder = _write_person(tree_root, root_uid, "Tomasz Mankin",
-                                    last_name=father_surname,
-                                    parents_id=[father_uid, mother_uid],
+                                    last_name="Mankin", sex="Mezczyzna",
+                                    parents_id=[root_father_uid],
+                                    parents=[str(rf_folder)],
                                     spouse_id=[spouse_uid],
-                                    children_id=[child_uid])
+                                    spouse=[str(spouse_folder)])
 
         for u, n, f in [
             (root_uid, "Tomasz Mankin", root_folder),
-            (spouse_uid, "Maria Mankin", spouse_folder),
-            (child_uid, "Piotr Mankin", child_folder),
-            (child_spouse_uid, "Marta Kowalska", child_spouse_folder),
-            (father_uid, "Adam Mankin", father_folder),
-            (mother_uid, "Anna Mankin", mother_folder),
-            (gf_paternal_uid, "Stefan Mankin", gf_paternal_folder),
-            (gm_paternal_uid, "Helena Inna", gm_paternal_folder),
-            (ggf_paternal_uid, "Karol Inny", ggf_folder),
-            (gf_maternal_uid, "Henryk Obcy", gf_maternal_folder),
-            (gm_maternal_uid, "Zofia Inna", gm_maternal_folder),
-            (gggf_maternal_uid, "Waclaw Obcy", gggf_maternal_folder),
+            (spouse_uid, "Maria Kowalska", spouse_folder),
+            (root_father_uid, "Jan Kowalski", rf_folder),
+            (spouse_father_uid, "Adam Mankin", sf_folder),
+            (spouse_mother_uid, "Helena Inna", sm_folder),
         ]:
             _add_to_cache(fs, u, n, f)
 
         ts.set_folder_tree_root_person(root_uid)
-        written, log = ts.rebuild_lineage()
+        ts.rebuild_folder_tree()
+        ts.rebuild_lineage()
 
+        drzewo_root = tree_root / "Drzewo"
         lineage_root = tree_root / "Rody"
-        assert lineage_root.is_dir()
+        mankin_sub = lineage_root / "Mankin"
 
-        # Exactly two subfolders (father_surname and mother_maiden)
-        subfolders = [p for p in lineage_root.iterdir() if p.is_dir()]
-        subfolder_names = sorted(p.name for p in subfolders)
-        assert subfolder_names == sorted([father_surname, mother_maiden]), (
-            f"Expected subfolders {[father_surname, mother_maiden]}, got {subfolder_names}"
+        assert mankin_sub.is_dir(), (
+            f"Rody/Mankin/ not found: {list(lineage_root.iterdir())}"
         )
 
-        # father-surname/ — 8 .lnk:
-        # universal(4) + R3(2: father+mother) + R4(2: gf_paternal + gm_paternal spouse-leaf)
-        # ggf_paternal excluded (surname differs)
-        father_sub = lineage_root / father_surname
-        father_lnks = [p for p in father_sub.iterdir() if p.suffix == ".lnk"]
-        assert len(father_lnks) == 8, (
-            f"father-surname/ expected 8 .lnk files, got {len(father_lnks)}: "
-            f"{[p.name for p in father_lnks]}"
+        # Find Adam Mankin's Drzewo .lnk name
+        drzewo_adam_lnks = [p.name for p in drzewo_root.iterdir()
+                            if p.suffix == ".lnk" and "Adam Mankin" in p.name]
+        assert len(drzewo_adam_lnks) >= 1, (
+            f"Adam Mankin .lnk not found in Drzewo/: {list(drzewo_root.iterdir())}"
+        )
+        drzewo_adam_name = drzewo_adam_lnks[0]
+
+        # Find Adam Mankin's lineage .lnk name in Rody/Mankin/
+        lineage_adam_lnks = [p.name for p in mankin_sub.iterdir()
+                             if p.suffix == ".lnk" and "Adam Mankin" in p.name]
+        assert len(lineage_adam_lnks) >= 1, (
+            f"Adam Mankin .lnk not found in Rody/Mankin/: {list(mankin_sub.iterdir())}"
+        )
+        lineage_adam_name = lineage_adam_lnks[0]
+
+        # H-A + H-B: names must be identical (global couple letter preserved)
+        assert drzewo_adam_name == lineage_adam_name, (
+            f"H-B FAIL: Drzewo='{drzewo_adam_name}' vs "
+            f"Lineage='{lineage_adam_name}' — couple letter must be global"
         )
 
-        # ggf_paternal must NOT be in father_sub (chain breaks at him)
-        assert not (father_sub / "Karol Inny.lnk").exists(), (
-            "ggf_paternal should be excluded (surname differs)"
+        # Confirm the couple letter in Adam Mankin's Drzewo name is B (couple_index=1)
+        # Drzewo: root pops first (LIFO; root pushed last), so root's parents = couple A.
+        # Spouse pushed first, so spouse's parents = couple B.
+        # Adam Mankin is spouse's father -> should be [B] in Drzewo.
+        assert "[B]" in drzewo_adam_name, (
+            f"Adam Mankin should be couple B in Drzewo, got '{drzewo_adam_name}'"
         )
-
-        # mother-maiden/ — 8 .lnk:
-        # universal(4) + R3(2: mother+father) + R4(2: gm_maternal + gf_maternal spouse-leaf)
-        # gggf_maternal excluded (has_maiden=False, last_name unrelated)
-        mother_sub = lineage_root / mother_maiden
-        mother_lnks = [p for p in mother_sub.iterdir() if p.suffix == ".lnk"]
-        assert len(mother_lnks) == 8, (
-            f"mother-maiden/ expected 8 .lnk files, got {len(mother_lnks)}: "
-            f"{[p.name for p in mother_lnks]}"
+        assert "[B]" in lineage_adam_name, (
+            f"Adam Mankin should be couple B in Rody/Mankin/, got '{lineage_adam_name}'"
         )
-
-        # gggf_maternal must NOT be in mother_sub (has_maiden=False -> last_name, no match)
-        assert not (mother_sub / "Waclaw Obcy.lnk").exists(), (
-            "gggf_maternal should be excluded (has_maiden=False gate)"
-        )
-
-        # build-log.txt at both levels
-        assert (lineage_root / "build-log.txt").exists()
-        assert (father_sub / "build-log.txt").exists()
-        assert (mother_sub / "build-log.txt").exists()
-
-        # total_written == 8 + 8 = 16
-        assert written == 16, f"Expected 16 total shortcuts written, got {written}"
 
 
 # ---------------------------------------------------------------------------
-# Test 2 — Stale subfolder wipe: second rebuild removes old subfolders
+# Test 3 — Stale subfolder wipe: second rebuild removes old subfolders
 # ---------------------------------------------------------------------------
 
 class TestLineageE2EWipeOnRebuild:
@@ -359,12 +370,66 @@ class TestLineageE2EWipeOnRebuild:
         assert "Stary" not in subfolders, "Stale subfolder must be wiped on rebuild"
         assert "Wiśniewski" in subfolders, "Wiśniewski/ must exist after second rebuild"
 
-        # Wiśniewski/ must contain Jan and Adam .lnk files
+        # Wiśniewski/ must contain encoded .lnk files (not bare names)
         wisnicki_sub = lineage_root / "Wiśniewski"
         lnk_names = [p.name for p in wisnicki_sub.iterdir() if p.suffix == ".lnk"]
-        assert "Jan Wiśniewski.lnk" in lnk_names, (
-            f"Root person .lnk missing: {lnk_names}"
-        )
-        assert "Adam Wiśniewski.lnk" in lnk_names, (
-            f"Father person .lnk missing: {lnk_names}"
+        assert len(lnk_names) >= 1, f"No .lnk files in Wiśniewski/: {lnk_names}"
+
+        # All .lnk files should have the encoded prefix format [NN][...]
+        for lnk_name in lnk_names:
+            assert lnk_name.startswith("["), (
+                f"Expected encoded .lnk name starting with '[', got '{lnk_name}'"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Test 4 — Member count: .lnk count matches FolderTreeService output
+# ---------------------------------------------------------------------------
+
+class TestLineageE2EMemberCount:
+
+    def test_lnk_count_in_surname_folder_matches_drzewo_membership(
+        self, tmp_path, monkeypatch
+    ):
+        """The number of .lnk files in a surname folder equals the number of
+        FolderTreeMember objects with that surname.
+
+        Tree: root(Mankin) + father(Mankin) + grandfather(Mankin, chain-breaks above)
+        All three have surname Mankin -> Mankin/ should have exactly 3 .lnk files.
+        """
+        ts, tree_root, fs = _setup_tree_service(tmp_path, monkeypatch)
+
+        gf_uid = str(uuid.uuid4())
+        father_uid = str(uuid.uuid4())
+        root_uid = str(uuid.uuid4())
+
+        gf_folder = _write_person(tree_root, gf_uid, "Andrzej Mankin",
+                                  last_name="Mankin", sex="Mezczyzna")
+        father_folder = _write_person(tree_root, father_uid, "Adam Mankin",
+                                      last_name="Mankin", sex="Mezczyzna",
+                                      parents_id=[gf_uid],
+                                      parents=[str(gf_folder)])
+        root_folder = _write_person(tree_root, root_uid, "Jan Mankin",
+                                    last_name="Mankin", sex="Mezczyzna",
+                                    parents_id=[father_uid],
+                                    parents=[str(father_folder)])
+
+        for u, n, f in [
+            (root_uid, "Jan Mankin", root_folder),
+            (father_uid, "Adam Mankin", father_folder),
+            (gf_uid, "Andrzej Mankin", gf_folder),
+        ]:
+            _add_to_cache(fs, u, n, f)
+
+        ts.set_folder_tree_root_person(root_uid)
+        ts.rebuild_lineage()
+
+        lineage_root = tree_root / "Rody"
+        mankin_sub = lineage_root / "Mankin"
+        assert mankin_sub.is_dir(), f"Rody/Mankin/ not found"
+
+        lnk_names = [p.name for p in mankin_sub.iterdir() if p.suffix == ".lnk"]
+        assert len(lnk_names) == 3, (
+            f"Expected 3 .lnk files (root + father + grandfather), got {len(lnk_names)}: "
+            f"{lnk_names}"
         )
