@@ -1,20 +1,27 @@
 """Lineages (family branches) — surname-grouped subfolder layout.
 
+LineageService is an assignment-over-Drzewo-members layer.
+compute_lineages() accepts List[FolderTreeMember] (already computed by
+FolderTreeService.compute_membership) and groups members by surname.
+Generation / couple / gender tokens are CARRIED THROUGH UNCHANGED from the
+FolderTreeMember objects. The .lnk filename for each member is produced by
+render_folder_tree_filename (the same Drzewo encoder, reused verbatim).
+LineageService does NOT compute generation, couple index, or gender — it
+consumes them from the Drzewo hourglass output.
+
 Public API:
     extract_lineage_surname       -- module helper; lineage surname for one person
     encode_lineage_folder_name    -- surname -> filesystem-safe folder name
-    encode_person_lnk_name        -- person display name -> .lnk filename
-    LineageMembers                -- dataclass: surname + contributor UID + member UID list
-    LineageService                -- compute_lineages(root_uuid) -> Dict[str, LineageMembers]
+    LineageService                -- compute_lineages(members) -> Dict[str, List[FolderTreeMember]]
 """
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
 from src.services.file_service import FileService
+from src.services.folder_tree_service import FolderTreeMember
 from src.wrappers.person_data_wrapper import PersonDataProperty, PersonDataWrapper
 
 
@@ -52,46 +59,23 @@ def encode_lineage_folder_name(surname: str) -> str:
     return "".join(("_" if c in _FORBIDDEN else c) for c in s)
 
 
-def encode_person_lnk_name(person_name: str) -> str:
-    """Person display name -> .lnk filename. Polish diacritics kept."""
-    s = (person_name or "").strip()
-    return "".join(("_" if c in _FORBIDDEN else c) for c in s) + ".lnk"
-
-
-# ---------------------------------------------------------------------------
-# Dataclass
-# ---------------------------------------------------------------------------
-
-@dataclass
-class LineageMembers:
-    """All members belonging to one lineage subfolder.
-
-    member_uids is ordered: universal members first (root + full descendant
-    subtree + their spouses), then contributing parent + their spouse, then
-    ancestors in walk order. Duplicates suppressed via insertion-order dict.
-    """
-
-    surname: str
-    contributor_uid: str
-    member_uids: List[str] = field(default_factory=list)
-
-
 # ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
 
 class LineageService:
-    """Compute lineage surname set with full membership (R1-R4).
+    """Assign Drzewo members into surname groups for Rody/ folder layout.
 
-    Enumeration order (deterministic):
-      1. root.parents[0]   (typically father)
-      2. root.parents[1]   (typically mother)
-      3. for each spouse in root.spouses (me.json list order):
-             spouse.parents[0]
-             spouse.parents[1]
+    Takes List[FolderTreeMember] (already-computed Drzewo output), groups members
+    by surname via extract_lineage_surname, and carries generation / couple / gender
+    tokens through UNCHANGED.
 
-    On collision (same surname from a later contributor), the FIRST entry
-    wins; the later contributor's UID is dropped and a log entry is appended.
+    .lnk filenames are produced by render_folder_tree_filename (the Drzewo encoder),
+    consumed by tree_service.rebuild_lineage.
+
+    Couple letters are Drzewo-GLOBAL: a member at couple B in Drzewo stays couple B
+    in his surname folder, even if that folder contains no couple A. LineageService
+    does NOT reindex couple letters per surname folder.
     """
 
     def __init__(self, file_service: FileService):
@@ -99,120 +83,47 @@ class LineageService:
         self._person_cache: Dict[str, Optional[PersonDataWrapper]] = {}
 
     def compute_lineages(
-        self, root_uuid: str
-    ) -> Tuple[Dict[str, LineageMembers], List[str]]:
-        """Return ({surname -> LineageMembers}, build_log).
+        self, members: List[FolderTreeMember]
+    ) -> Tuple[Dict[str, List[FolderTreeMember]], List[str]]:
+        """Group Drzewo members into surname folders.
 
-        Keys are distinct lineage surnames. Values hold the contributor UID
-        and the ordered, deduplicated member UID list (universal + R3 + R4 walk).
-        The build_log contains informational / anomaly entries only.
+        Args:
+            members: List[FolderTreeMember] as returned by
+                     FolderTreeService.compute_membership. Generation, couple
+                     index, and gender tokens are consumed verbatim — never
+                     recomputed.
+
+        Returns:
+            ({surname -> List[FolderTreeMember]}, build_log_messages)
+
+        Each member appears in exactly the surname group matching its
+        extract_lineage_surname (read from the person's me.json). Members
+        whose extract_lineage_surname returns None are excluded; a log entry
+        is appended for each such exclusion.
         """
         self._person_cache = {}
         log: List[str] = []
-        lineages: Dict[str, LineageMembers] = {}
+        lineages: Dict[str, List[FolderTreeMember]] = {}
 
-        root = self._read_person(root_uuid, log)
-        if root is None:
-            log.append(f"LINEAGE: root uid={root_uuid} unreadable.")
-            return lineages, log
-
-        # --- Step 1: universal members (root + full descendant subtree) ---
-        universal: List[str] = []
-        universal_seen: Set[str] = set()
-
-        def universal_add(uid: str) -> None:
-            if uid and uid not in universal_seen:
-                universal.append(uid)
-                universal_seen.add(uid)
-
-        def walk_descendants(person_uid: str) -> None:
-            # Cycle-safe: already-added UID is not re-walked.
-            if person_uid in universal_seen:
-                return
-            person = self._read_person(person_uid, log)
-            if person is None:
+        for member in members:
+            uid = member.uid
+            person_data = self._read_person(uid, log)
+            if person_data is None:
                 log.append(
-                    f"LINEAGE: descendant uid={person_uid} not in cache; "
-                    "subtree below skipped."
-                )
-                return
-            uid = person.get_unique_identifier() or person_uid
-            universal_add(uid)
-            for sp in person.get_spouse_ids():
-                universal_add(sp)       # spouses as leaves; not walked further
-            for ch in person.get_children_ids():
-                walk_descendants(ch)
-
-        walk_descendants(root.get_unique_identifier() or root_uuid)
-
-        # --- Step 2: enumerate contributing parents (deterministic order) ---
-        contributors: List[Tuple[str, str]] = []
-        for i, p_uid in enumerate(root.get_parent_ids()):
-            contributors.append((p_uid, f"root.parent[{i}]"))
-        for j, sp_uid in enumerate(root.get_spouse_ids()):
-            spouse = self._read_person(sp_uid, log)
-            if spouse is None:
-                log.append(
-                    f"LINEAGE: spouse[{j}] uid={sp_uid} not readable; "
-                    "their parents skipped."
-                )
-                continue
-            for i, sp_p_uid in enumerate(spouse.get_parent_ids()):
-                contributors.append((sp_p_uid, f"spouse[{j}].parent[{i}]"))
-
-        # --- Step 3: per-contributor, build the lineage member list ---
-        for contributor_uid, role in contributors:
-            if not contributor_uid:
-                continue
-            contributor = self._read_person(contributor_uid, log)
-            if contributor is None:
-                log.append(
-                    f"LINEAGE: {role} (uid={contributor_uid}) not in cache; skipped."
+                    f"LINEAGE: member uid={uid} not readable from cache; skipped."
                 )
                 continue
 
-            lineage_surname = extract_lineage_surname(contributor)
-            if lineage_surname is None:
+            surname = extract_lineage_surname(person_data)
+            if surname is None:
                 log.append(
-                    f"LINEAGE: {role} (uid={contributor_uid}) has no lineage surname; skipped."
+                    f"LINEAGE: member uid={uid} has no lineage surname; skipped."
                 )
                 continue
 
-            # Collision: first contributor wins
-            if lineage_surname in lineages:
-                log.append(
-                    f"LINEAGE: surname '{lineage_surname}' already contributed by earlier slot; "
-                    f"{role} (uid={contributor_uid}) does not create a new folder."
-                )
-                continue
-
-            members: List[str] = []
-            seen: Set[str] = set()
-
-            def add(uid: str) -> None:
-                if uid and uid not in seen:
-                    members.append(uid)
-                    seen.add(uid)
-
-            # R1+R2: universal members in fixed order
-            for u in universal:
-                add(u)
-
-            # R3: contributing parent + their spouse
-            add(contributor_uid)
-            for sp_of_contrib in contributor.get_spouse_ids():
-                add(sp_of_contrib)
-
-            # R4: ancestor walk — matching-surname ancestors only
-            _walk_lineage_ancestors(
-                contributor, lineage_surname, add, log, self._read_person
-            )
-
-            lineages[lineage_surname] = LineageMembers(
-                surname=lineage_surname,
-                contributor_uid=contributor_uid,
-                member_uids=members,
-            )
+            if surname not in lineages:
+                lineages[surname] = []
+            lineages[surname].append(member)
 
         return lineages, log
 
@@ -249,44 +160,3 @@ class LineageService:
             )
             self._person_cache[uid] = None
             return None
-
-
-# ---------------------------------------------------------------------------
-# Module-level ancestor walk (R4)
-# ---------------------------------------------------------------------------
-
-def _walk_lineage_ancestors(
-    start_person: PersonDataWrapper,
-    lineage_surname: str,
-    add,
-    log: List[str],
-    read_person,
-) -> None:
-    """BFS through start_person's parents. Include only ancestors whose
-    extract_lineage_surname matches lineage_surname. Each matching ancestor's
-    spouse is included as a leaf (no further walk through them). Branches
-    whose surname diverges stop immediately.
-    """
-    stack = list(start_person.get_parent_ids())
-    visited: Set[str] = set()
-    while stack:
-        anc_uid = stack.pop(0)
-        if not anc_uid or anc_uid in visited:
-            continue
-        visited.add(anc_uid)
-        anc = read_person(anc_uid, log)
-        if anc is None:
-            log.append(
-                f"LINEAGE: ancestor uid={anc_uid} not readable; branch stopped."
-            )
-            continue
-        anc_surname = extract_lineage_surname(anc)
-        if anc_surname != lineage_surname:
-            continue  # branch terminates here
-        add(anc_uid)
-        # Spouse-leaf: include but do NOT walk further
-        for sp_uid in anc.get_spouse_ids():
-            add(sp_uid)
-        # Continue walking this ancestor's parents
-        for pp_uid in anc.get_parent_ids():
-            stack.append(pp_uid)
