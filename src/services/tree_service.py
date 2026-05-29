@@ -673,7 +673,7 @@ class TreeService():
     def _is_valid_optional_date(value: str | None) -> bool:
         if value is None:
             return True
-        
+
         try:
             OptionalDate.from_string(value)
         except (ValueError, Exception):

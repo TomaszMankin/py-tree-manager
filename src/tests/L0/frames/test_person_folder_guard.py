@@ -1,14 +1,15 @@
 """Person-folder me.json pre-check guard tests.
 
 Guard B: before calling _load_person_for_edit, check that me.json exists.
-If absent → Polish warning dialog + early return (no load).
+If absent → Polish warning dialog + re-show dialog (loop).
 If present → _load_person_for_edit called.
 If user cancels dialog → no crash.
 
-Three tests:
+Four tests:
   1. Missing me.json → dialog shown, _load_person_for_edit NOT called.
   2. Present me.json → _load_person_for_edit called.
   3. User cancels DirDialog → no crash.
+  4. Missing me.json on first attempt, cancel on second → _load_person_for_edit NOT called, no exception.
 """
 
 from __future__ import annotations
@@ -80,21 +81,35 @@ def _build_frame(tmp_path: Path, monkeypatch) -> "AddPersonFrame":
 class TestOpenPersonMissingMeJson:
 
     def test_open_person_missing_me_json_shows_warning(self, tmp_path, monkeypatch):
-        """A folder without me.json must trigger the warning dialog; load not called."""
+        """A folder without me.json must trigger the warning dialog; load not called.
+
+        The loop re-shows the dialog after the warning; the second ShowModal
+        returns wx.ID_CANCEL so the loop exits cleanly.
+        """
         frame = _build_frame(tmp_path, monkeypatch)
 
         person_folder = tmp_path / "Jan Kowalski"
         person_folder.mkdir()
         # me.json intentionally NOT created
 
+        # First call: ID_OK with bad folder; second call: ID_CANCEL (exits loop)
         mock_dialog_cls = MagicMock()
-        mock_dialog_instance = MagicMock()
-        mock_dialog_instance.ShowModal.return_value = wx.ID_OK
-        mock_dialog_instance.GetPath.return_value = str(person_folder)
-        mock_dialog_cls.return_value = mock_dialog_instance
+        first_instance = MagicMock()
+        first_instance.ShowModal.return_value = wx.ID_OK
+        first_instance.GetPath.return_value = str(person_folder)
+
+        second_instance = MagicMock()
+        second_instance.ShowModal.return_value = wx.ID_CANCEL
+
+        mock_dialog_cls.side_effect = [first_instance, second_instance]
 
         mock_load = MagicMock()
         mock_polish = MagicMock()
+
+        expected_message = (
+            "Wybrany folder nie zawiera informacji o żadnej osobie. "
+            "Wybierz osobę bezpośrednio z folderu \"Lista osób\", nie głębiej."
+        )
 
         with patch("src.frames.add_person_frame.wx.DirDialog", mock_dialog_cls), \
              patch.object(frame, "_load_person_for_edit", mock_load), \
@@ -103,6 +118,10 @@ class TestOpenPersonMissingMeJson:
 
         mock_load.assert_not_called()
         assert mock_polish.called, "Expected polish_dialog (warning) to be called"
+        actual_message = mock_polish.call_args[0][1]
+        assert actual_message == expected_message, (
+            f"Wrong Polish message.\nExpected: {expected_message!r}\nGot:      {actual_message!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -156,3 +175,40 @@ class TestOpenPersonCancel:
             frame.on_open_person_click(MagicMock())
 
         mock_load.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Test 4: Missing me.json on first attempt, cancel on second → clean exit
+# ---------------------------------------------------------------------------
+
+class TestOpenPersonMissingThenCancel:
+
+    def test_open_person_missing_then_cancel_exits_cleanly(self, tmp_path, monkeypatch):
+        """First ShowModal OK (bad folder), second ShowModal CANCEL → load never called, no exception."""
+        frame = _build_frame(tmp_path, monkeypatch)
+
+        person_folder = tmp_path / "Bad Folder"
+        person_folder.mkdir()
+        # me.json intentionally NOT created
+
+        first_instance = MagicMock()
+        first_instance.ShowModal.return_value = wx.ID_OK
+        first_instance.GetPath.return_value = str(person_folder)
+
+        second_instance = MagicMock()
+        second_instance.ShowModal.return_value = wx.ID_CANCEL
+
+        mock_dialog_cls = MagicMock()
+        mock_dialog_cls.side_effect = [first_instance, second_instance]
+
+        mock_load = MagicMock()
+        mock_polish = MagicMock()
+
+        with patch("src.frames.add_person_frame.wx.DirDialog", mock_dialog_cls), \
+             patch.object(frame, "_load_person_for_edit", mock_load), \
+             patch("src.frames.add_person_frame.polish_dialog", mock_polish):
+            frame.on_open_person_click(MagicMock())
+
+        mock_load.assert_not_called()
+        # Warning was shown once (for the bad folder)
+        assert mock_polish.call_count == 1, "Expected exactly one warning dialog"
