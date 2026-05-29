@@ -21,6 +21,9 @@
 | ADR-015 | Migrate hosting + CI from Bitbucket Pipelines to GitHub Actions + GitHub Releases | accepted | 2026-05-17 |
 | ADR-016 | Lineage folders — surname-grouped subfolders with descendant + ancestor membership (supersedes ADR-004) | accepted | 2026-05-17 |
 | ADR-017 | Picker exclusion lifecycle — `set_selected_people` MUST fire `on_change_callback` on every state mutation (extends ADR-011) | accepted | 2026-05-19 |
+| ADR-018 | Inno Setup installer — fixed per-user location, Desktop + Start Menu shortcuts, update-path observability (amends ADR-013/014) | proposed | 2026-05-29 |
+| ADR-019 | Folder-selection guards — forbidden root names + person-folder me.json pre-check | proposed | 2026-05-29 |
+| ADR-020 | Partial-date prefix markers — "Około" (~) and "Przed" (<) on birth/death dates | accepted | 2026-05-29 |
 
 ## Conventions
 

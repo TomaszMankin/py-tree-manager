@@ -63,12 +63,12 @@ class AddPersonFrame(wx.Frame):
                 self._tree_service.set_root_location(folder_path)
                 init_logging(root_folder=Path(folder_path))
                 import sys as _sys  # noqa: PLC0415
+                import os as _os  # noqa: PLC0415
                 if getattr(_sys, "frozen", False):
                     try:
-                        import os as _os2  # noqa: PLC0415
                         from src.helpers.shortcut_helper import ShortcutHelper  # noqa: PLC0415
                         canonical = (
-                            Path(_os2.environ.get("LOCALAPPDATA", ""))
+                            Path(_os.environ.get("LOCALAPPDATA", ""))
                             / "Programs" / "PyTreeManager" / "PyTreeManager.exe"
                         )
                         if canonical.exists():
@@ -77,8 +77,8 @@ class AddPersonFrame(wx.Frame):
                                 shortcut_path=str(Path(folder_path) / "PyTreeManager.lnk"),
                                 working_dir=folder_path,
                             )
-                    except Exception:
-                        pass  # Shortcut creation must never crash the app.
+                    except Exception as e:
+                        log_error(e, context="root shortcut creation failed")
             else:
                 raise RuntimeError("Root folder has to be selected or set.")
             
@@ -1555,14 +1555,17 @@ class AddPersonFrame(wx.Frame):
         if dialog.ShowModal() == wx.ID_OK:
             folder_path = dialog.GetPath()
             dialog.Destroy()
+
             if not (Path(folder_path) / "me.json").exists():
                 polish_dialog(
                     self,
                     "Wybrany folder nie zawiera pliku osoby. Wybierz inny folder.",
-                    "Nieprawidłowy folder",
+                    "Błąd odczytu",
                     wx.OK | wx.ICON_WARNING,
                 )
                 return
+
+
             try:
                 self._load_person_for_edit(folder_path)
             except Exception as e:
