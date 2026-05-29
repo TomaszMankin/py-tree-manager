@@ -675,8 +675,7 @@ class TreeService():
             return True
 
         try:
-            body = value.lstrip("~<")
-            OptionalDate.from_string(body)
+            OptionalDate.from_string(value)
         except (ValueError, Exception):
             return False
 
