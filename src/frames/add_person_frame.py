@@ -25,19 +25,6 @@ from src.frames.menu_state import MenuMode, compute_menu_state
 # scrollbar regardless of screen position.  400 px ≈ 10 rows at font_size=20.
 DAY_DROPDOWN_POPUP_MAX_HEIGHT_PX = 400
 
-# ADR-019 §2.1 — folders that must never be used as the tree root.
-# Single source of truth; mirrors file_service._forbidden_locations exactly.
-# Codepoints:
-#   "Pozostałe nieuporządkowane": ł U+0142, ę U+0119, ą U+0105
-#   "Rutowscy - dane ogólne": ó U+00F3
-#   "Do ustalenia": (no diacritics)
-#   "Wspólne": ó U+00F3
-FORBIDDEN_ROOT_FOLDER_NAMES: frozenset = frozenset({
-    "Pozostałe nieuporządkowane",
-    "Rutowscy - dane ogólne",
-    "Do ustalenia",
-    "Wspólne",
-})
 
 
 class AddPersonFrame(wx.Frame):
@@ -73,23 +60,8 @@ class AddPersonFrame(wx.Frame):
             folder_path = self.select_folder()
 
             if folder_path is not None:
-                # ADR-019 §2.1 — reject forbidden root-folder names before commit.
-                import os as _os  # noqa: PLC0415
-                basename = _os.path.basename(folder_path.rstrip("/\\"))
-                if basename in FORBIDDEN_ROOT_FOLDER_NAMES:
-                    polish_dialog(
-                        self,
-                        "Ten folder nie może być folderem głównym drzewa."
-                        " Wybierz inny folder.",
-                        "Nieprawidłowy folder",
-                        wx.OK | wx.ICON_WARNING,
-                    )
-                    raise RuntimeError("Root folder has to be selected or set.")
                 self._tree_service.set_root_location(folder_path)
                 init_logging(root_folder=Path(folder_path))
-                # ADR-018 §2.1 D-1 — place a PyTreeManager.lnk in the root
-                # folder so the user has a shortcut. Frozen-only; graceful
-                # no-op in dev mode or if the canonical exe is absent.
                 import sys as _sys  # noqa: PLC0415
                 if getattr(_sys, "frozen", False):
                     try:
@@ -817,7 +789,7 @@ class AddPersonFrame(wx.Frame):
         Creates 5 dropdowns (Day, Month, Century, Decade, Unit) plus 2 checkboxes
         (Przed / Około) that encode the date-prefix markers < and ~.
         Supports formats: XXXX (unknown), 1999 (full), 199X, 19XX.
-        Prefix markers per ADR-020: ~ = Około (approximate), < = Przed (upper boundary).
+        Prefix markers: ~ = Około (approximate), < = Przed (upper boundary).
 
         Args:
             parent: Parent window
@@ -1583,7 +1555,6 @@ class AddPersonFrame(wx.Frame):
         if dialog.ShowModal() == wx.ID_OK:
             folder_path = dialog.GetPath()
             dialog.Destroy()
-            # ADR-019 §2.2 — pre-check me.json existence before loading.
             if not (Path(folder_path) / "me.json").exists():
                 polish_dialog(
                     self,
@@ -2083,7 +2054,7 @@ class AddPersonFrame(wx.Frame):
 
         Returns a 7-tuple: (day, month, century, decade, unit, okolo, przed).
         Backward-compatible: a bare "YYYY-MM-DD" returns okolo=False, przed=False.
-        Prefix markers per ADR-020: ~ = Około, < = Przed, order [~][<] but parser
+        Prefix markers: ~ = Około, < = Przed, order [~][<] but parser
         accepts any order via the [~<]* character class.
         """
         if date is None:
