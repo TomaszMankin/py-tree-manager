@@ -72,35 +72,17 @@ jobs:
         run: .\.pipelines\ci\rename-artifact.ps1
 
       - name: Build installer (Inno Setup)
-        env:
-          VERSION: ${{ steps.bump.outputs.new_version }}
         run: |
-          # Rename raw exe to stable name for the installer bundle.
-          Copy-Item "dist\py-tree-manager-${{ env.VERSION }}.exe" "dist\PyTreeManager.exe" -Force
-          # Compile the Inno Setup installer; skip gracefully if iscc is absent.
-          # Install Inno Setup on the runner to enable this step in production.
-          # See RELEASE.md for manual fallback instructions.
-          try {
-            $iscc = Get-Command iscc -ErrorAction Stop
-            & iscc "/DMyAppVersion=${{ env.VERSION }}" "installer\py-tree-manager.iss"
-            if ($LASTEXITCODE -ne 0) {
-              Write-Warning "iscc exited $LASTEXITCODE — installer artifact not produced"
-            }
-          } catch {
-            Write-Warning "iscc not found on PATH — installer not built (see RELEASE.md for manual compile)"
-          }
-        shell: pwsh
+          $version = "${{ steps.bump.outputs.new_version }}"
+          Copy-Item "dist/py-tree-manager-$version.exe" "dist/PyTreeManager.exe" -Force
+          & "C:\Program Files (x86)\Inno Setup 6\iscc.exe" /DMyAppVersion=$version installer/py-tree-manager.iss
 
       - name: Publish release
         run: |
           $version = "${{ steps.bump.outputs.new_version }}"
-          $assets = @("dist/py-tree-manager-$version.exe")
-          # Include installer if it was produced.
-          $installer = "installer_output/PyTreeManager-Setup-$version.exe"
-          if (Test-Path $installer) {
-            $assets += $installer
-          }
-          gh release create "v$version" @assets `
+          gh release create "v$version" `
+            "dist/py-tree-manager-$version.exe" `
+            "installer_output/PyTreeManager-Setup-$version.exe" `
             --latest `
             --target "${{ github.sha }}" `
             --title "v$version" `
