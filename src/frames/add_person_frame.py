@@ -25,6 +25,20 @@ from src.frames.menu_state import MenuMode, compute_menu_state
 # scrollbar regardless of screen position.  400 px ≈ 10 rows at font_size=20.
 DAY_DROPDOWN_POPUP_MAX_HEIGHT_PX = 400
 
+# ADR-019 §2.1 — folders that must never be used as the tree root.
+# Single source of truth; mirrors file_service._forbidden_locations exactly.
+# Codepoints:
+#   "Pozostałe nieuporządkowane": ł U+0142, ę U+0119, ą U+0105
+#   "Rutowscy - dane ogólne": ó U+00F3
+#   "Do ustalenia": (no diacritics)
+#   "Wspólne": ó U+00F3
+FORBIDDEN_ROOT_FOLDER_NAMES: frozenset = frozenset({
+    "Pozostałe nieuporządkowane",
+    "Rutowscy - dane ogólne",
+    "Do ustalenia",
+    "Wspólne",
+})
+
 
 class AddPersonFrame(wx.Frame):
     """
@@ -59,8 +73,40 @@ class AddPersonFrame(wx.Frame):
             folder_path = self.select_folder()
 
             if folder_path is not None:
+                # ADR-019 §2.1 — reject forbidden root-folder names before commit.
+                import os as _os  # noqa: PLC0415
+                basename = _os.path.basename(folder_path.rstrip("/\\"))
+                if basename in FORBIDDEN_ROOT_FOLDER_NAMES:
+                    polish_dialog(
+                        self,
+                        "Ten folder nie może być folderem głównym drzewa."
+                        " Wybierz inny folder.",
+                        "Nieprawidłowy folder",
+                        wx.OK | wx.ICON_WARNING,
+                    )
+                    raise RuntimeError("Root folder has to be selected or set.")
                 self._tree_service.set_root_location(folder_path)
                 init_logging(root_folder=Path(folder_path))
+                # ADR-018 §2.1 D-1 — place a PyTreeManager.lnk in the root
+                # folder so the user has a shortcut. Frozen-only; graceful
+                # no-op in dev mode or if the canonical exe is absent.
+                import sys as _sys  # noqa: PLC0415
+                if getattr(_sys, "frozen", False):
+                    try:
+                        import os as _os2  # noqa: PLC0415
+                        from src.helpers.shortcut_helper import ShortcutHelper  # noqa: PLC0415
+                        canonical = (
+                            Path(_os2.environ.get("LOCALAPPDATA", ""))
+                            / "Programs" / "PyTreeManager" / "PyTreeManager.exe"
+                        )
+                        if canonical.exists():
+                            ShortcutHelper.create_app_shortcut(
+                                target_exe=str(canonical),
+                                shortcut_path=str(Path(folder_path) / "PyTreeManager.lnk"),
+                                working_dir=folder_path,
+                            )
+                    except Exception:
+                        pass  # Shortcut creation must never crash the app.
             else:
                 raise RuntimeError("Root folder has to be selected or set.")
             
@@ -768,8 +814,10 @@ class AddPersonFrame(wx.Frame):
         """
         Create a date picker with support for partial/unknown dates.
 
-        Creates 5 dropdowns: Day, Month, Century, Decade, Unit
-        Supports formats: XXXX (unknown), 1999 (full), 199X, 19XX
+        Creates 5 dropdowns (Day, Month, Century, Decade, Unit) plus 2 checkboxes
+        (Przed / Około) that encode the date-prefix markers < and ~.
+        Supports formats: XXXX (unknown), 1999 (full), 199X, 19XX.
+        Prefix markers per ADR-020: ~ = Około (approximate), < = Przed (upper boundary).
 
         Args:
             parent: Parent window
@@ -777,9 +825,24 @@ class AddPersonFrame(wx.Frame):
 
         Returns:
             Tuple of:
-            - Dictionary with keys: 'day', 'month', 'year_century', 'year_decade', 'year_unit'
-            - BoxSizer containing all 5 dropdowns horizontally arranged
+            - Dictionary with keys: 'day', 'month', 'year_century', 'year_decade',
+              'year_unit', 'przed', 'okolo'
+            - BoxSizer containing the checkboxes row + 5 dropdowns row, stacked vertically
         """
+        outer_sizer = wx.BoxSizer(wx.VERTICAL)
+
+        # ── Checkbox row: [Przed] [Około] ─────────────────────────────────────
+        checkbox_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        przed_checkbox = wx.CheckBox(parent, label="Przed")
+        okolo_checkbox = wx.CheckBox(parent, label="Około")
+        przed_font = przed_checkbox.GetFont()
+        przed_font.SetPointSize(font_size)
+        przed_checkbox.SetFont(przed_font)
+        okolo_checkbox.SetFont(przed_font)
+        checkbox_sizer.Add(przed_checkbox, 0, wx.RIGHT, 8)
+        checkbox_sizer.Add(okolo_checkbox, 0)
+
+        # ── Date dropdowns row ────────────────────────────────────────────────
         date_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
         days = ["Dzień", "XX"] + [str(i).rjust(2, "0") for i in range(1, 32)]
@@ -810,15 +873,20 @@ class AddPersonFrame(wx.Frame):
         date_sizer.Add(decade_dropdown, 1, wx.EXPAND | wx.RIGHT, 5)
         date_sizer.Add(year_dropdown, 1, wx.EXPAND)
 
+        outer_sizer.Add(checkbox_sizer, 0, wx.BOTTOM, 2)
+        outer_sizer.Add(date_sizer, 0, wx.EXPAND)
+
         date_dropdowns_dict = {
             'day': day_dropdown,
             'month': month_dropdown,
             'year_century': century_dropdown,
             'year_decade': decade_dropdown,
-            'year_unit': year_dropdown
+            'year_unit': year_dropdown,
+            'przed': przed_checkbox,
+            'okolo': okolo_checkbox,
         }
 
-        return date_dropdowns_dict, date_sizer
+        return date_dropdowns_dict, outer_sizer
 
     def _create_menu(self):
         """Build the three-section 'Plik' menu.
@@ -1181,13 +1249,15 @@ class AddPersonFrame(wx.Frame):
         # Sex dropdown
         self.sex_dropdown.Bind(wx.EVT_COMBOBOX, self._on_field_dirty)
 
-        # Birth date dropdowns (5 combos)
-        for combo in self.birth_date_picker.values():
-            combo.Bind(wx.EVT_COMBOBOX, self._on_field_dirty)
+        # Birth date dropdowns (5 combos; skip the 2 checkbox entries)
+        for ctrl in self.birth_date_picker.values():
+            if not isinstance(ctrl, wx.CheckBox):
+                ctrl.Bind(wx.EVT_COMBOBOX, self._on_field_dirty)
 
-        # Death date dropdowns (5 combos)
-        for combo in self.death_date_picker.values():
-            combo.Bind(wx.EVT_COMBOBOX, self._on_field_dirty)
+        # Death date dropdowns (5 combos; skip the 2 checkbox entries)
+        for ctrl in self.death_date_picker.values():
+            if not isinstance(ctrl, wx.CheckBox):
+                ctrl.Bind(wx.EVT_COMBOBOX, self._on_field_dirty)
 
         # Pickers: wire through their on_change_callback by replacing it.
         # The callback is called synchronously on every selection change inside
@@ -1513,6 +1583,15 @@ class AddPersonFrame(wx.Frame):
         if dialog.ShowModal() == wx.ID_OK:
             folder_path = dialog.GetPath()
             dialog.Destroy()
+            # ADR-019 §2.2 — pre-check me.json existence before loading.
+            if not (Path(folder_path) / "me.json").exists():
+                polish_dialog(
+                    self,
+                    "Wybrany folder nie zawiera pliku osoby. Wybierz inny folder.",
+                    "Nieprawidłowy folder",
+                    wx.OK | wx.ICON_WARNING,
+                )
+                return
             try:
                 self._load_person_for_edit(folder_path)
             except Exception as e:
@@ -1670,12 +1749,20 @@ class AddPersonFrame(wx.Frame):
         # Sex dropdown
         self.sex_dropdown.SetSelection(0)
 
-        # Date pickers (both birth and death) — index 0 is the placeholder hint
-        for combo in self.birth_date_picker.values():
-            combo.SetSelection(0)
-        for combo in self.death_date_picker.values():
-            combo.SetSelection(0)
-            combo.Enable(False)  # death dates default disabled
+        # Date pickers (both birth and death) — index 0 is the placeholder hint.
+        # Each picker dict contains wx.ComboBox / wx.adv.OwnerDrawnComboBox entries
+        # plus wx.CheckBox entries ('przed', 'okolo') — handle separately.
+        for key, ctrl in self.birth_date_picker.items():
+            if isinstance(ctrl, wx.CheckBox):
+                ctrl.SetValue(False)
+            else:
+                ctrl.SetSelection(0)
+        for key, ctrl in self.death_date_picker.items():
+            if isinstance(ctrl, wx.CheckBox):
+                ctrl.SetValue(False)
+            else:
+                ctrl.SetSelection(0)
+            ctrl.Enable(False)  # death controls default disabled
 
         # Relationship pickers
         self.parents_picker.set_selected_people([])
@@ -1877,11 +1964,19 @@ class AddPersonFrame(wx.Frame):
 
         output.set_notes(self.notes_textbox.GetValue().strip())
 
-        birth_date = self._build_optional_date(self.birth_date_picker)
+        birth_date = self._build_optional_date(
+            self.birth_date_picker,
+            okolo=self.birth_date_picker['okolo'].GetValue(),
+            przed=self.birth_date_picker['przed'].GetValue(),
+        )
         output.set_date_of_birth(birth_date if birth_date else '')
 
         if self.is_dead_checkbox.GetValue():
-            death_date = self._build_optional_date(self.death_date_picker)
+            death_date = self._build_optional_date(
+                self.death_date_picker,
+                okolo=self.death_date_picker['okolo'].GetValue(),
+                przed=self.death_date_picker['przed'].GetValue(),
+            )
             output.set_date_of_death(death_date if death_date else '')
         else:
             output.set_date_of_death('')
@@ -1959,6 +2054,8 @@ class AddPersonFrame(wx.Frame):
         self.birth_date_picker['year_century'].SetValue(birth_date[2])
         self.birth_date_picker['year_decade'].SetValue(birth_date[3])
         self.birth_date_picker['year_unit'].SetValue(birth_date[4])
+        self.birth_date_picker['okolo'].SetValue(birth_date[5])
+        self.birth_date_picker['przed'].SetValue(birth_date[6])
 
         raw_death_date: bool | None = person_data_wrapper.get_date_of_death()
         self.is_dead_checkbox.SetValue(bool(raw_death_date))
@@ -1976,16 +2073,33 @@ class AddPersonFrame(wx.Frame):
             self.death_date_picker['year_decade'].Enable(True)
             self.death_date_picker['year_unit'].SetValue(death_date[4])
             self.death_date_picker['year_unit'].Enable(True)
+            self.death_date_picker['okolo'].SetValue(death_date[5])
+            self.death_date_picker['okolo'].Enable(True)
+            self.death_date_picker['przed'].SetValue(death_date[6])
+            self.death_date_picker['przed'].Enable(True)
     
-    def _deconstruct_optional_date(self, date: str | None) -> Tuple[str, str, str, str, str]:
-        
+    def _deconstruct_optional_date(self, date: str | None) -> Tuple[str, str, str, str, str, bool, bool]:
+        """Parse a stored date string into its constituent parts plus prefix flags.
+
+        Returns a 7-tuple: (day, month, century, decade, unit, okolo, przed).
+        Backward-compatible: a bare "YYYY-MM-DD" returns okolo=False, przed=False.
+        Prefix markers per ADR-020: ~ = Około, < = Przed, order [~][<] but parser
+        accepts any order via the [~<]* character class.
+        """
         if date is None:
-            return ('XX', 'XX', 'XX', 'X', 'X')
-        
-        optional_date = re.match(r"[X0-9]{4}-[X0-9]{2}-[X0-9]{2}", date)
+            return ('XX', 'XX', 'XX', 'X', 'X', False, False)
+
+        # Strip optional prefix markers before running the body regex.
+        prefix_match = re.match(r'^([~<]*)(.*)', date)
+        prefix = prefix_match.group(1)
+        body = prefix_match.group(2)
+        okolo = '~' in prefix
+        przed = '<' in prefix
+
+        optional_date = re.match(r"[X0-9]{4}-[X0-9]{2}-[X0-9]{2}", body)
         if not optional_date:
-            return ('XX', 'XX', 'XX', 'X', 'X')
-        
+            return ('XX', 'XX', 'XX', 'X', 'X', okolo, przed)
+
         found_strings = optional_date.group().split('-')
 
         day = found_strings[2]
@@ -1994,11 +2108,18 @@ class AddPersonFrame(wx.Frame):
         decade = found_strings[0][2:3]
         year = found_strings[0][3:]
 
-        return (day, month, century, decade, year)
+        return (day, month, century, decade, year, okolo, przed)
 
-    def _build_optional_date(self, date_picker: Dict[str, wx.ComboBox]) -> Optional[str]:
-        # Check if ANY value was selected (not all hints)
-        any_selected = any(date_picker[key].GetSelection() > 0 for key in date_picker.keys())
+    def _build_optional_date(
+        self,
+        date_picker: Dict[str, wx.ComboBox],
+        okolo: bool = False,
+        przed: bool = False,
+    ) -> Optional[str]:
+        # Check if ANY dropdown value was selected (not all hints).
+        # Only inspect dropdown keys, not checkbox keys ('przed', 'okolo').
+        dropdown_keys = ('day', 'month', 'year_century', 'year_decade', 'year_unit')
+        any_selected = any(date_picker[key].GetSelection() > 0 for key in dropdown_keys)
 
         if not any_selected:
             return None
@@ -2012,7 +2133,8 @@ class AddPersonFrame(wx.Frame):
         month = get('month', 'XX')
         day = get('day', 'XX')
 
-        return f"{year}-{month}-{day}"
+        prefix = ("~" if okolo else "") + ("<" if przed else "")
+        return f"{prefix}{year}-{month}-{day}"
 
 
         
