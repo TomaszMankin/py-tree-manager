@@ -88,6 +88,53 @@ class ShortcutHelper():
         link.QueryInterface(pythoncom.IID_IPersistFile).Save(shortcut_path, 0)
 
     @staticmethod
+    def create_app_shortcut(
+        target_exe: str,
+        shortcut_path: str,
+        working_dir: str,
+        description: str = "PyTreeManager",
+    ) -> None:
+        """Create a Windows shortcut (.lnk) pointing to an .exe file.
+
+        Unlike create_shortcut (which targets a directory), this method
+        targets an executable file. Used to place a PyTreeManager.lnk in
+        the user's chosen tree-root folder.
+
+        Args:
+            target_exe:    Absolute path to the .exe target file.
+            shortcut_path: Absolute path where the .lnk should be written.
+            working_dir:   Working-directory for the shortcut.
+            description:   Optional description shown in file properties.
+
+        Raises:
+            ValueError: If shortcut_path is empty or doesn't end with .lnk,
+                        or if parent directory does not exist.
+        """
+        if not shortcut_path or not shortcut_path.strip():
+            raise ValueError(f"Given shortcut creation location is not valid: <{shortcut_path}>")
+
+        if not shortcut_path.lower().endswith(".lnk"):
+            raise ValueError(
+                f"Shortcut path should end with '<name>.lnk'. Given path: <{shortcut_path}>"
+            )
+
+        parent_dir = Path(shortcut_path).parent
+        if not parent_dir.exists():
+            raise ValueError(f"Parent directory does not exist: <{parent_dir}>")
+
+        # Use IShellLinkW directly (Unicode-clean, same reason as create_shortcut).
+        link = pythoncom.CoCreateInstance(
+            win32_shell.CLSID_ShellLink,
+            None,
+            pythoncom.CLSCTX_INPROC_SERVER,
+            win32_shell.IID_IShellLink,
+        )
+        link.SetPath(target_exe)
+        link.SetWorkingDirectory(working_dir)
+        link.SetDescription(description)
+        link.QueryInterface(pythoncom.IID_IPersistFile).Save(shortcut_path, 0)
+
+    @staticmethod
     def remove_shortcut(shortcut_path: str) -> None:
         """Remove an existing Windows shortcut (.lnk) file.
 

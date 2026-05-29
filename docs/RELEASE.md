@@ -83,6 +83,56 @@ After the first successful `release.yml` run on `main`:
 4. Double-click to launch. The bundled `update.bat` extracts to the same
    folder on first run. From then on every launch auto-checks for updates.
 
+## Installer — first install and migration guide (sprint-20, ADR-018)
+
+### First install via installer (new machines)
+
+Starting with the first release that includes an installer:
+
+1. Download `PyTreeManager-Setup-X.Y.Z.exe` from the Releases page.
+2. Double-click — no UAC prompt (per-user install, `PrivilegesRequired=lowest`).
+3. App installs to `%LOCALAPPDATA%\Programs\PyTreeManager\PyTreeManager.exe`.
+4. A Desktop shortcut and a Start Menu entry are created automatically.
+5. Click "Uruchom PyTreeManager" on the final installer screen, or use the Desktop shortcut.
+6. On first launch, pick the tree-root folder. A `PyTreeManager.lnk` shortcut is placed in
+   the root folder for quick access (frozen/installed mode only).
+
+### Migrating an existing bare-.exe install
+
+If the father already has a bare `py-tree-manager-X.Y.Z.exe` on his Desktop
+(pre-installer distribution):
+
+1. Download and run `PyTreeManager-Setup-X.Y.Z.exe`.
+2. The installer places the app at the fixed location and creates proper shortcuts.
+3. Delete the old bare `.exe` from the Desktop (or wherever it was).
+4. Going forward, updates flow automatically via the in-app updater (`update.bat`).
+   The Desktop shortcut targets the fixed location, so it stays valid after every update.
+
+### Manual Inno Setup compile (if iscc absent on the runner)
+
+The CI runner must have Inno Setup installed with `iscc.exe` on the System PATH.
+If it is missing, `release.yml` will warn and skip the installer step; the raw `.exe`
+is still published.
+
+To compile the installer manually on the developer machine:
+
+1. Install Inno Setup 6 from https://jrsoftware.org/isdl.php
+2. In a PowerShell terminal:
+   ```powershell
+   # From the repo root, after PyInstaller has produced dist\PyTreeManager.exe:
+   iscc /DMyAppVersion=1.0.5 installer\py-tree-manager.iss
+   # Output: installer_output\PyTreeManager-Setup-1.0.5.exe
+   ```
+3. Upload the resulting installer manually to the GitHub Release if needed.
+
+To install Inno Setup on the self-hosted runner (one-time):
+
+```powershell
+winget install --id JRSoftware.InnoSetup --scope machine
+# Then restart the runner service so it picks up the updated PATH:
+Restart-Service '<runner-service-name>'
+```
+
 ## Manual minor or major bump
 
 Patch is auto-resolved from existing tags. For a deliberate minor or major

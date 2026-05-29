@@ -39,6 +39,24 @@ from src.helpers.update_info import UpdateInfo
 
 
 # ---------------------------------------------------------------------------
+# Deferred logger import — keep wx-free at module level
+# ---------------------------------------------------------------------------
+
+def _emit_info_raw(label: str, payload: str) -> None:  # type: ignore[return]
+    """Emit one INFO line to the journey log.
+
+    Delegates to logger._emit_info_raw. Wrapped so a logging failure NEVER
+    breaks the update path — all callers are already inside their own
+    try/except safety nets, but belt-and-suspenders here too.
+    """
+    try:
+        from src.helpers.logger import _emit_info_raw as _logger_emit_info_raw  # noqa: PLC0415
+        _logger_emit_info_raw(label, payload)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
@@ -46,6 +64,7 @@ GITHUB_RELEASES_API_URL = (
     "https://api.github.com/repos/TomaszMankin/py-tree-manager/releases/latest"
 )
 ASSET_NAME_PREFIX = "py-tree-manager-"
+INSTALLER_ASSET_NAME_PREFIX = "PyTreeManager-Setup-"
 ASSET_NAME_SUFFIX = ".exe"
 FETCH_TIMEOUT_SECONDS: float = 10.0
 DOWNLOAD_TIMEOUT_SECONDS: float = 600.0
@@ -132,7 +151,7 @@ class UpdateHelper:
             if not isinstance(assets, list) or not assets:
                 return None
 
-            download_url = _pick_asset_url(assets, latest_version)
+            download_url, is_installer = _pick_asset_url(assets, latest_version)
             if download_url is None:
                 return None
             if not download_url.startswith("https://"):
@@ -142,19 +161,32 @@ class UpdateHelper:
                 return None
 
             if not _compare_versions(latest_version, current_version):
+                _emit_info_raw(
+                    "-",
+                    f"Update check: up to date (latest={latest_version} current={current_version})",
+                )
                 return None
 
             return UpdateInfo(
                 latest_version=latest_version,
                 download_url=download_url,
                 published_at=published_at,
+                is_installer=is_installer,
             )
 
         except (socket.timeout, URLError, HTTPError, OSError,
                 json.JSONDecodeError, KeyError, TypeError, ValueError):
+            _emit_info_raw(
+                "-",
+                f"Update check: no result (network/parse) — staying on {current_version}",
+            )
             return None
         except Exception:
             # Catch-all: update_helper MUST NEVER crash the app.
+            _emit_info_raw(
+                "-",
+                f"Update check: no result (network/parse) — staying on {current_version}",
+            )
             return None
 
     @staticmethod
@@ -198,49 +230,120 @@ class UpdateHelper:
 
     @staticmethod
     def download_and_apply_update(update_info: UpdateInfo) -> None:
-        """Download the new .exe, launch update.bat, then sys.exit(0).
+        """Download the update and apply it, then sys.exit(0).
 
-        In dev mode (sys.frozen is False) returns without doing anything.
-        On any error before launching the helper: log and return (app keeps
-        running). On successful helper launch: sys.exit(0) transfers control.
+        Installer flow (update_info.is_installer=True):
+            Download PyTreeManager-Setup-<v>.exe to a temp dir,
+            run it /VERYSILENT /NORESTART. Inno Setup replaces the exe
+            in-place and recreates all shortcuts.
 
-        Argv order (load-bearing, tested):
-            ["cmd.exe", "/c", bat_path, exe_path, new_exe_path, parent_pid]
+        Raw-exe fallback (is_installer=False):
+            Download to <exe>.new, launch update.bat swap helper.
+
+        In dev mode (sys.frozen is False): returns without doing anything.
+        On any error before launch: log and return (app keeps running).
         """
+        import tempfile  # noqa: PLC0415
+
         if not getattr(sys, "frozen", False):
+            _emit_info_raw("-", "Update: dev mode (not frozen) — self-replace skipped")
             return
 
-        exe_path = Path(sys.executable).resolve()
-        exe_dir = exe_path.parent
-        new_exe_path = exe_path.with_suffix(".exe.new")
-        bat_path = exe_dir / "update.bat"
-
-        if not bat_path.exists():
-            return
-
-        try:
-            _download_to(update_info.download_url, new_exe_path,
-                         timeout=DOWNLOAD_TIMEOUT_SECONDS)
-        except Exception:
+        if update_info.is_installer:
+            tmp_dir = Path(tempfile.gettempdir()) / "PyTreeManagerUpdate"
             try:
-                if new_exe_path.exists():
-                    new_exe_path.unlink()
-            except OSError:
-                pass
-            return
+                tmp_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                _emit_info_raw("-", f"Update: could not create temp dir {tmp_dir} — {e}")
+            installer_path = tmp_dir / f"PyTreeManager-Setup-{update_info.latest_version}.exe"
 
-        parent_pid = str(os.getpid())
-        try:
-            subprocess.Popen(
-                ["cmd.exe", "/c", str(bat_path),
-                 str(exe_path), str(new_exe_path), parent_pid],
-                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
-                close_fds=True,
-            )
-        except Exception:
-            return
+            try:
+                _download_to(update_info.download_url, installer_path,
+                             timeout=DOWNLOAD_TIMEOUT_SECONDS)
+            except Exception as e:
+                _emit_info_raw("-", f"Update: download failed for {update_info.download_url} — {e}")
+                try:
+                    from src.helpers.email_helper import enqueue_email_for_severity  # noqa: PLC0415
+                    enqueue_email_for_severity(
+                        severity="ERROR",
+                        headline=f"Auto-update download failed: {e}",
+                        body_extra=f"version={update_info.latest_version} url={update_info.download_url}",
+                        handler_name="download_and_apply_update",
+                    )
+                except Exception as e:
+                    _emit_info_raw("-", f"Update: email send failed — {e}")
+                return
 
-        sys.exit(0)
+            try:
+                _emit_info_raw("-", "Update: running installer silently; waiting for result")
+                result = subprocess.run(
+                    [str(installer_path), "/VERYSILENT", "/NORESTART"],
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=120,
+                )
+                if result.returncode != 0:
+                    _emit_info_raw("-", f"Update: installer exited with code {result.returncode}")
+                    try:
+                        from src.helpers.email_helper import enqueue_email_for_severity  # noqa: PLC0415
+                        enqueue_email_for_severity(
+                            severity="ERROR",
+                            headline=f"Auto-update installer failed (exit code {result.returncode})",
+                            body_extra=f"version={update_info.latest_version} installer={installer_path}",
+                            handler_name="download_and_apply_update",
+                        )
+                    except Exception as e:
+                        _emit_info_raw("-", f"Update: email send failed — {e}")
+                    return
+            except Exception as e:
+                _emit_info_raw("-", f"Update: installer failed — {e}")
+                try:
+                    from src.helpers.email_helper import enqueue_email_for_severity  # noqa: PLC0415
+                    enqueue_email_for_severity(
+                        severity="ERROR",
+                        headline=f"Auto-update installer failed: {e}",
+                        body_extra=f"version={update_info.latest_version} installer={installer_path}",
+                        handler_name="download_and_apply_update",
+                    )
+                except Exception as _mail_exc:
+                    _emit_info_raw("-", f"Update: email send failed — {_mail_exc}")
+                return
+            sys.exit(0)
+
+        else:
+            exe_path = Path(sys.executable).resolve()
+            exe_dir = exe_path.parent
+            new_exe_path = exe_path.with_suffix(".exe.new")
+            bat_path = exe_dir / "update.bat"
+
+            if not bat_path.exists():
+                _emit_info_raw("-", f"Update: update.bat not found at {bat_path} — cannot self-replace")
+                return
+
+            try:
+                _download_to(update_info.download_url, new_exe_path,
+                             timeout=DOWNLOAD_TIMEOUT_SECONDS)
+            except Exception:
+                _emit_info_raw("-", f"Update: download failed for {update_info.download_url}")
+                try:
+                    if new_exe_path.exists():
+                        new_exe_path.unlink()
+                except OSError as e:
+                    _emit_info_raw("-", f"Update: cleanup of partial download failed — {e}")
+                return
+
+            parent_pid = str(os.getpid())
+            try:
+                _emit_info_raw("-", "Update: launching update.bat; exiting for swap")
+                subprocess.Popen(
+                    ["cmd.exe", "/c", str(bat_path),
+                     str(exe_path), str(new_exe_path), parent_pid],
+                    creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+                    close_fds=True,
+                )
+            except Exception as e:
+                _emit_info_raw("-", f"Update: update.bat launch failed — {e}")
+                return
+            sys.exit(0)
 
     @staticmethod
     def ensure_update_helper_present() -> None:
@@ -279,22 +382,38 @@ _ensure_update_helper_present = UpdateHelper.ensure_update_helper_present
 # Internal helpers (module-private; not part of UpdateHelper namespace)
 # ---------------------------------------------------------------------------
 
-def _pick_asset_url(assets: list, version: str) -> Optional[str]:
-    """Pick the .exe asset URL from a GitHub release's assets array.
+def _pick_asset_url(assets: list, version: str):
+    """Pick the best .exe asset URL from a GitHub release's assets array.
+
+    Returns (url: str, is_installer: bool) or (None, False).
 
     Strategy:
-      1. Prefer exact-name match: "py-tree-manager-<version>.exe"
-      2. Defensive fallback: if exactly one .exe asset exists, use it
-      3. Otherwise None (caller treats as no-update)
+      1. Prefer Inno Setup installer: "PyTreeManager-Setup-<version>.exe"
+      2. Fallback to raw exe: "py-tree-manager-<version>.exe"
+      3. Fallback to any single .exe asset
+      4. Otherwise (None, False)
     """
-    expected_name = f"{ASSET_NAME_PREFIX}{version}{ASSET_NAME_SUFFIX}"
+    installer_name = f"{INSTALLER_ASSET_NAME_PREFIX}{version}{ASSET_NAME_SUFFIX}"
+    raw_name = f"{ASSET_NAME_PREFIX}{version}{ASSET_NAME_SUFFIX}"
+
+    installer_url = None
+    raw_url = None
     for asset in assets:
         if not isinstance(asset, dict):
             continue
         name = asset.get("name")
         url = asset.get("browser_download_url")
-        if name == expected_name and isinstance(url, str):
-            return url
+        if not isinstance(url, str):
+            continue
+        if name == installer_name:
+            installer_url = url
+        elif name == raw_name:
+            raw_url = url
+
+    if installer_url:
+        return installer_url, True
+    if raw_url:
+        return raw_url, False
 
     exe_assets = [
         a for a in assets
@@ -304,8 +423,8 @@ def _pick_asset_url(assets: list, version: str) -> Optional[str]:
         and isinstance(a.get("browser_download_url"), str)
     ]
     if len(exe_assets) == 1:
-        return exe_assets[0]["browser_download_url"]
-    return None
+        return exe_assets[0]["browser_download_url"], False
+    return None, False
 
 
 def _compare_versions(a: str, b: str) -> bool:

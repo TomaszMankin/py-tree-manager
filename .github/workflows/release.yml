@@ -71,10 +71,18 @@ jobs:
           BUMPED_VERSION: ${{ steps.bump.outputs.new_version }}
         run: .\.pipelines\ci\rename-artifact.ps1
 
+      - name: Build installer (Inno Setup)
+        run: |
+          $version = "${{ steps.bump.outputs.new_version }}"
+          Copy-Item "dist/py-tree-manager-$version.exe" "dist/PyTreeManager.exe" -Force
+          iscc /DMyAppVersion=$version installer/py-tree-manager.iss
+
       - name: Publish release
         run: |
           $version = "${{ steps.bump.outputs.new_version }}"
-          gh release create "v$version" "dist/py-tree-manager-$version.exe" `
+          gh release create "v$version" `
+            "dist/py-tree-manager-$version.exe" `
+            "dist/PyTreeManager-Setup-$version.exe" `
             --latest `
             --target "${{ github.sha }}" `
             --title "v$version" `
