@@ -275,19 +275,32 @@ class UpdateHelper:
                 return
 
             try:
-                _emit_info_raw("-", f"Update: launching installer silently; exiting")
-                subprocess.Popen(
+                _emit_info_raw("-", "Update: running installer silently; waiting for result")
+                result = subprocess.run(
                     [str(installer_path), "/VERYSILENT", "/NORESTART"],
-                    creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
-                    close_fds=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=120,
                 )
+                if result.returncode != 0:
+                    _emit_info_raw("-", f"Update: installer exited with code {result.returncode}")
+                    try:
+                        from src.helpers.email_helper import enqueue_email_for_severity  # noqa: PLC0415
+                        enqueue_email_for_severity(
+                            severity="ERROR",
+                            headline=f"Auto-update installer failed (exit code {result.returncode})",
+                            body_extra=f"version={update_info.latest_version} installer={installer_path}",
+                            handler_name="download_and_apply_update",
+                        )
+                    except Exception:
+                        pass
+                    return
             except Exception as e:
-                _emit_info_raw("-", f"Update: installer launch failed — {e}")
+                _emit_info_raw("-", f"Update: installer failed — {e}")
                 try:
                     from src.helpers.email_helper import enqueue_email_for_severity  # noqa: PLC0415
                     enqueue_email_for_severity(
                         severity="ERROR",
-                        headline=f"Auto-update installer launch failed: {e}",
+                        headline=f"Auto-update installer failed: {e}",
                         body_extra=f"version={update_info.latest_version} installer={installer_path}",
                         handler_name="download_and_apply_update",
                     )
