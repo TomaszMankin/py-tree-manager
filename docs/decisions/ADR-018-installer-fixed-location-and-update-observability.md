@@ -10,6 +10,12 @@ amends: ADR-013, ADR-014
 
 # ADR-018 — Installer + update observability
 
+## Problem
+
+- No canonical install location: exe copied to arbitrary folders; shortcuts broke after every update.
+- Stale exe copies left behind after raw-exe swap (ADR-014); user ran old version unknowingly.
+- Update check silently no-opped: metadata read exception swallowed the entire update block, so available upgrades were never surfaced.
+
 ## Decision
 
 - Binary installs to `%LOCALAPPDATA%\Programs\PyTreeManager\PyTreeManager.exe` (fixed, per-user, writable).
@@ -19,11 +25,6 @@ amends: ADR-013, ADR-014
 - Fallback for older releases without installer asset: raw `.exe` + `update.bat` swap (ADR-014 unchanged).
 - OnInit update block logs every branch (check-entered, up-to-date, newer-available, accepted, declined, download-failed, launch-failed).
 - User declining is NOT persisted — re-prompt on next launch.
-
-## Why
-
-Issue #14: no canonical location, no shortcuts, stale copies after update.
-Issue #24: silent no-op (metadata read exception swallowed entire update block).
 
 ## Consequences
 

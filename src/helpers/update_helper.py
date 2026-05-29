@@ -253,8 +253,8 @@ class UpdateHelper:
             tmp_dir = Path(tempfile.gettempdir()) / "PyTreeManagerUpdate"
             try:
                 tmp_dir.mkdir(parents=True, exist_ok=True)
-            except OSError:
-                pass
+            except OSError as e:
+                _emit_info_raw("-", f"Update: could not create temp dir {tmp_dir} — {e}")
             installer_path = tmp_dir / f"PyTreeManager-Setup-{update_info.latest_version}.exe"
 
             try:
@@ -270,8 +270,8 @@ class UpdateHelper:
                         body_extra=f"version={update_info.latest_version} url={update_info.download_url}",
                         handler_name="download_and_apply_update",
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    _emit_info_raw("-", f"Update: email send failed — {e}")
                 return
 
             try:
@@ -291,8 +291,8 @@ class UpdateHelper:
                             body_extra=f"version={update_info.latest_version} installer={installer_path}",
                             handler_name="download_and_apply_update",
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        _emit_info_raw("-", f"Update: email send failed — {e}")
                     return
             except Exception as e:
                 _emit_info_raw("-", f"Update: installer failed — {e}")
@@ -304,8 +304,8 @@ class UpdateHelper:
                         body_extra=f"version={update_info.latest_version} installer={installer_path}",
                         handler_name="download_and_apply_update",
                     )
-                except Exception:
-                    pass
+                except Exception as _mail_exc:
+                    _emit_info_raw("-", f"Update: email send failed — {_mail_exc}")
                 return
             sys.exit(0)
 

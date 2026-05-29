@@ -662,8 +662,8 @@ def _build_logging_app_class():
                                 _read_global_person_label(),
                                 f"Update: user accepted {info.latest_version}; entering download_and_apply",
                             )
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            log_error(e, context="update check: failed to emit accepted log")
                         UpdateHelper.download_and_apply_update(info)
                     else:
                         try:

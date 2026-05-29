@@ -9,13 +9,13 @@ author: architect
 
 # ADR-019 — Folder-selection guards
 
+## Problem
+
+User could select any folder in the tree browser — including subfolders that contain no `me.json` — and the app would crash with a raw `FileNotFoundError`, displaying a confusing technical error message instead of a clear explanation.
+
 ## Decision
 
 Before calling `_load_person_for_edit`, check that the selected folder contains `me.json`. If absent: show Polish warning dialog and return early. Keep the existing `except FileNotFoundError` as a race-condition safety net.
-
-## Why
-
-Issue #24: `_load_person_for_edit` raised `FileNotFoundError` when the user selected a folder without `me.json` (e.g. a person's subfolder rather than their root folder). The exception was caught and showed a generic error; pre-check gives a clearer message and avoids the exception path entirely.
 
 ## Consequences
 
