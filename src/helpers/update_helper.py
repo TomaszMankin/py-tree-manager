@@ -39,7 +39,7 @@ from src.helpers.update_info import UpdateInfo
 
 
 # ---------------------------------------------------------------------------
-# Deferred logger import — keep wx-free at module level (ADR-007 §4)
+# Deferred logger import — keep wx-free at module level
 # ---------------------------------------------------------------------------
 
 def _emit_info_raw(label: str, payload: str) -> None:  # type: ignore[return]

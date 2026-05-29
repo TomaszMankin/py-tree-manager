@@ -1,4 +1,4 @@
-"""Person-folder me.json pre-check guard tests (sprint-20, ADR-019 §2.2).
+"""Person-folder me.json pre-check guard tests.
 
 Guard B: before calling _load_person_for_edit, check that me.json exists.
 If absent → Polish warning dialog + early return (no load).

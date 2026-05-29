@@ -98,7 +98,7 @@ class ShortcutHelper():
 
         Unlike create_shortcut (which targets a directory), this method
         targets an executable file. Used to place a PyTreeManager.lnk in
-        the user's chosen tree-root folder (ADR-018 §2.1, D-1 addition).
+        the user's chosen tree-root folder.
 
         Args:
             target_exe:    Absolute path to the .exe target file.

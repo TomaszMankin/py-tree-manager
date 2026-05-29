@@ -1,4 +1,4 @@
-"""L0 unit tests for update-path observability log lines (sprint-20, ADR-018 §2.2).
+"""L0 unit tests for update-path observability log lines.
 
 Verifies that:
 1. check_for_update emits "no result" INFO on network/parse error.
