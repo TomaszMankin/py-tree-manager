@@ -85,8 +85,8 @@ class TestDatePrefixMarkers:
         frame.birth_date_picker['przed'].SetValue(True)
 
         # Pick a date so the body is non-empty: year_century=19, month=04
-        frame.birth_date_picker['year_century'].SetSelection(3)  # "19"
-        frame.birth_date_picker['month'].SetSelection(5)          # "04"
+        frame.birth_date_picker['year_century'].SetStringSelection("19")
+        frame.birth_date_picker['month'].SetStringSelection("04")
 
         result = frame._build_optional_date(
             frame.birth_date_picker,
