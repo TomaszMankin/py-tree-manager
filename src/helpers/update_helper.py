@@ -39,6 +39,24 @@ from src.helpers.update_info import UpdateInfo
 
 
 # ---------------------------------------------------------------------------
+# Deferred logger import — keep wx-free at module level (ADR-007 §4)
+# ---------------------------------------------------------------------------
+
+def _emit_info_raw(label: str, payload: str) -> None:  # type: ignore[return]
+    """Emit one INFO line to the journey log.
+
+    Delegates to logger._emit_info_raw. Wrapped so a logging failure NEVER
+    breaks the update path — all callers are already inside their own
+    try/except safety nets, but belt-and-suspenders here too.
+    """
+    try:
+        from src.helpers.logger import _emit_info_raw as _logger_emit_info_raw  # noqa: PLC0415
+        _logger_emit_info_raw(label, payload)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
@@ -142,6 +160,10 @@ class UpdateHelper:
                 return None
 
             if not _compare_versions(latest_version, current_version):
+                _emit_info_raw(
+                    "-",
+                    f"Update check: up to date (latest={latest_version} current={current_version})",
+                )
                 return None
 
             return UpdateInfo(
@@ -152,9 +174,17 @@ class UpdateHelper:
 
         except (socket.timeout, URLError, HTTPError, OSError,
                 json.JSONDecodeError, KeyError, TypeError, ValueError):
+            _emit_info_raw(
+                "-",
+                f"Update check: no result (network/parse) — staying on {current_version}",
+            )
             return None
         except Exception:
             # Catch-all: update_helper MUST NEVER crash the app.
+            _emit_info_raw(
+                "-",
+                f"Update check: no result (network/parse) — staying on {current_version}",
+            )
             return None
 
     @staticmethod
@@ -208,6 +238,7 @@ class UpdateHelper:
             ["cmd.exe", "/c", bat_path, exe_path, new_exe_path, parent_pid]
         """
         if not getattr(sys, "frozen", False):
+            _emit_info_raw("-", "Update: dev mode (not frozen) — self-replace skipped")
             return
 
         exe_path = Path(sys.executable).resolve()
@@ -216,12 +247,20 @@ class UpdateHelper:
         bat_path = exe_dir / "update.bat"
 
         if not bat_path.exists():
+            _emit_info_raw(
+                "-",
+                f"Update: update.bat not found at {bat_path} — cannot self-replace",
+            )
             return
 
         try:
             _download_to(update_info.download_url, new_exe_path,
                          timeout=DOWNLOAD_TIMEOUT_SECONDS)
         except Exception:
+            _emit_info_raw(
+                "-",
+                f"Update: download failed for {update_info.download_url}",
+            )
             try:
                 if new_exe_path.exists():
                     new_exe_path.unlink()
@@ -231,6 +270,7 @@ class UpdateHelper:
 
         parent_pid = str(os.getpid())
         try:
+            _emit_info_raw("-", "Update: launching update.bat; exiting for swap")
             subprocess.Popen(
                 ["cmd.exe", "/c", str(bat_path),
                  str(exe_path), str(new_exe_path), parent_pid],

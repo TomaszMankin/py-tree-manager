@@ -26,6 +26,7 @@ from src.frames.menu_state import MenuMode, compute_menu_state
 DAY_DROPDOWN_POPUP_MAX_HEIGHT_PX = 400
 
 
+
 class AddPersonFrame(wx.Frame):
     """
     Main frame for adding a new person to the family tree.
@@ -61,6 +62,23 @@ class AddPersonFrame(wx.Frame):
             if folder_path is not None:
                 self._tree_service.set_root_location(folder_path)
                 init_logging(root_folder=Path(folder_path))
+                import sys as _sys  # noqa: PLC0415
+                import os as _os  # noqa: PLC0415
+                if getattr(_sys, "frozen", False):
+                    try:
+                        from src.helpers.shortcut_helper import ShortcutHelper  # noqa: PLC0415
+                        canonical = (
+                            Path(_os.environ.get("LOCALAPPDATA", ""))
+                            / "Programs" / "PyTreeManager" / "PyTreeManager.exe"
+                        )
+                        if canonical.exists():
+                            ShortcutHelper.create_app_shortcut(
+                                target_exe=str(canonical),
+                                shortcut_path=str(Path(folder_path) / "PyTreeManager.lnk"),
+                                working_dir=folder_path,
+                            )
+                    except Exception:
+                        pass
             else:
                 raise RuntimeError("Root folder has to be selected or set.")
             
@@ -1513,6 +1531,16 @@ class AddPersonFrame(wx.Frame):
         if dialog.ShowModal() == wx.ID_OK:
             folder_path = dialog.GetPath()
             dialog.Destroy()
+
+            if not (Path(folder_path) / "me.json").exists():
+                polish_dialog(
+                    self,
+                    "Wybrany folder nie zawiera pliku osoby. Wybierz inny folder.",
+                    "Błąd odczytu",
+                    wx.OK | wx.ICON_WARNING,
+                )
+                return
+
             try:
                 self._load_person_for_edit(folder_path)
             except Exception as e:
