@@ -260,8 +260,18 @@ class UpdateHelper:
             try:
                 _download_to(update_info.download_url, installer_path,
                              timeout=DOWNLOAD_TIMEOUT_SECONDS)
-            except Exception:
-                _emit_info_raw("-", f"Update: download failed for {update_info.download_url}")
+            except Exception as e:
+                _emit_info_raw("-", f"Update: download failed for {update_info.download_url} — {e}")
+                try:
+                    from src.helpers.email_helper import enqueue_email_for_severity  # noqa: PLC0415
+                    enqueue_email_for_severity(
+                        severity="ERROR",
+                        headline=f"Auto-update download failed: {e}",
+                        body_extra=f"version={update_info.latest_version} url={update_info.download_url}",
+                        handler_name="download_and_apply_update",
+                    )
+                except Exception:
+                    pass
                 return
 
             try:
@@ -271,7 +281,18 @@ class UpdateHelper:
                     creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
                     close_fds=True,
                 )
-            except Exception:
+            except Exception as e:
+                _emit_info_raw("-", f"Update: installer launch failed — {e}")
+                try:
+                    from src.helpers.email_helper import enqueue_email_for_severity  # noqa: PLC0415
+                    enqueue_email_for_severity(
+                        severity="ERROR",
+                        headline=f"Auto-update installer launch failed: {e}",
+                        body_extra=f"version={update_info.latest_version} installer={installer_path}",
+                        handler_name="download_and_apply_update",
+                    )
+                except Exception:
+                    pass
                 return
             sys.exit(0)
 
@@ -293,8 +314,8 @@ class UpdateHelper:
                 try:
                     if new_exe_path.exists():
                         new_exe_path.unlink()
-                except OSError:
-                    pass
+                except OSError as e:
+                    _emit_info_raw("-", f"Update: cleanup of partial download failed — {e}")
                 return
 
             parent_pid = str(os.getpid())
@@ -306,7 +327,8 @@ class UpdateHelper:
                     creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
                     close_fds=True,
                 )
-            except Exception:
+            except Exception as e:
+                _emit_info_raw("-", f"Update: update.bat launch failed — {e}")
                 return
             sys.exit(0)
 

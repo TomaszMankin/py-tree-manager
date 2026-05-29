@@ -645,8 +645,8 @@ def _build_logging_app_class():
                         _read_global_person_label(),
                         f"Update check: entered current={current} skipped={skipped} url=<api>",
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_error(e, context="update check: failed to emit check-entered log")
                 info = UpdateHelper.check_for_update(current, skipped_version=skipped)
                 if info is not None:
                     try:
@@ -654,8 +654,8 @@ def _build_logging_app_class():
                             _read_global_person_label(),
                             f"Update check: newer version {info.latest_version} available; prompting user",
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_error(e, context="update check: failed to emit newer-available log")
                     if UpdateHelper.prompt_user_to_update(frame, info):
                         try:
                             _emit_info_raw(
@@ -669,13 +669,10 @@ def _build_logging_app_class():
                         try:
                             _emit_info_raw(
                                 _read_global_person_label(),
-                                f"Update: user declined {info.latest_version}; remembered as skipped",
+                                f"Update: user declined {info.latest_version}; will prompt again next launch",
                             )
-                        except Exception:
-                            pass
-                        if fs2.is_root_location_set():
-                            UpdateHelper.remember_skipped_version(fs2.settings, info.latest_version)
-                            fs2.save_settings()
+                        except Exception as e:
+                            log_error(e, context="update check: failed to emit declined log")
             except Exception as e:
                 log_error(e, context="OnInit: update_helper check failed")
 

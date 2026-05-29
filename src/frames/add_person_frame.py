@@ -77,8 +77,8 @@ class AddPersonFrame(wx.Frame):
                                 shortcut_path=str(Path(folder_path) / "PyTreeManager.lnk"),
                                 working_dir=folder_path,
                             )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_error(e, context="root shortcut creation failed")
             else:
                 raise RuntimeError("Root folder has to be selected or set.")
             
