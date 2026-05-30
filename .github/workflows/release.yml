@@ -75,7 +75,12 @@ jobs:
         run: |
           $version = "${{ steps.bump.outputs.new_version }}"
           Copy-Item "dist/py-tree-manager-$version.exe" "dist/PyTreeManager.exe" -Force
-          iscc /DMyAppVersion=$version installer/py-tree-manager.iss
+          $distAbs = (Resolve-Path "dist").Path
+          iscc /DMyAppVersion=$version /DOutputDir=$distAbs installer/py-tree-manager.iss
+          if (-not (Test-Path "dist/PyTreeManager-Setup-$version.exe")) {
+            Write-Error "Installer not found at dist/PyTreeManager-Setup-$version.exe"
+            exit 1
+          }
 
       - name: Publish release
         run: |
