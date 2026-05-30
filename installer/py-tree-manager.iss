@@ -14,6 +14,7 @@ AppPublisherURL=https://github.com/TomaszMankin/py-tree-manager
 PrivilegesRequired=lowest
 DefaultDirName={localappdata}\Programs\PyTreeManager
 DisableDirPage=yes
+DisableProgramGroupPage=yes
 OutputBaseFilename=PyTreeManager-Setup-{#MyAppVersion}
 OutputDir={#OutputDir}
 SourceDir=..
