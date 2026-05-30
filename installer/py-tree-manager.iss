@@ -1,5 +1,10 @@
 #define MyAppName "PyTreeManager"
+#ifndef MyAppVersion
 #define MyAppVersion "1.0.0"
+#endif
+#ifndef OutputDir
+#define OutputDir "..\dist"
+#endif
 
 [Setup]
 AppName={#MyAppName}

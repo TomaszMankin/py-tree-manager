@@ -95,8 +95,6 @@ jobs:
           Copy-Item "dist/py-tree-manager-$version.exe" "dist/PyTreeManager.exe"
           $distAbs = (Resolve-Path "dist").Path.Replace('\', '/')
           iscc /DMyAppVersion=$version "/DOutputDir=$distAbs" installer/py-tree-manager.iss
-          Write-Host "=== iscc output locations ==="
-          Get-ChildItem -Recurse -Filter "PyTreeManager-Setup-*.exe" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.FullName }
           $expected = "dist/PyTreeManager-Setup-$version.exe"
           if (-not (Test-Path $expected)) {
             Write-Error "Installer not found at expected path: $expected"
