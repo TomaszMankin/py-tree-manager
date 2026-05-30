@@ -1,5 +1,10 @@
 #define MyAppName "PyTreeManager"
+#ifndef MyAppVersion
 #define MyAppVersion "1.0.0"
+#endif
+#ifndef OutputDir
+#define OutputDir "..\dist"
+#endif
 
 [Setup]
 AppName={#MyAppName}
@@ -10,7 +15,7 @@ PrivilegesRequired=lowest
 DefaultDirName={localappdata}\Programs\PyTreeManager
 DisableDirPage=yes
 OutputBaseFilename=PyTreeManager-Setup-{#MyAppVersion}
-OutputDir=..\dist
+OutputDir={#OutputDir}
 SourceDir=..
 Compression=lzma
 SolidCompression=yes
